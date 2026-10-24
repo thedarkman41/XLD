@@ -21,7 +21,8 @@ extern int XLDDarkModeSupportEnabled;
 	taskArr = [[NSMutableArray alloc] init];
 	progressViewArr = [[NSMutableArray alloc] init];
 	lock = [[NSLock alloc] init];
-	
+	busyDevices = [[NSCountedSet alloc] init];
+
 	toolbarItems = [[NSMutableDictionary alloc] init];
 	NSToolbarItem *item = [[NSToolbarItem alloc] initWithItemIdentifier:@"CancelAllTasks"];
 	[item setLabel:LS(@"Cancel All Tasks")];
@@ -57,8 +58,28 @@ extern int XLDDarkModeSupportEnabled;
 	[progressViewArr release];
 	if(delegate) [delegate release];
 	[lock release];
+	[busyDevices release];
 	[toolbarItems release];
 	[super dealloc];
+}
+
+/* A task may start when a thread is free and, if it reads a drive, when no
+   other running task is already reading that drive. (SourceForge ticket #631) */
+- (BOOL)canStartTask:(id)task
+{
+	if(threadsOccupied >= [delegate maxThreads]) return NO;
+	NSString *key = [task atomicKey];
+	if(!key) return YES;
+	return ![busyDevices containsObject:key];
+}
+
+- (void)startTask:(id)task
+{
+	NSString *key = [task atomicKey];
+	if(key) [busyDevices addObject:key];
+	[task beginConvert];
+	if(lowestActivePosition < [task position]) lowestActivePosition = [task position];
+	threadsOccupied += [task threadsOccupied];
 }
 
 - (IBAction)test:(id)sender
@@ -82,27 +103,15 @@ extern int XLDDarkModeSupportEnabled;
 		[[taskArr objectAtIndex:i] showProgressInView:o_tableView row:i-1];
 	}*/
 	if([task isActive]) threadsOccupied -= [task threadsOccupied];
-	if([task isActive] && [task isAtomic]) atomic = NO;
+	if([task isActive]) { NSString *k = [task atomicKey]; if(k) [busyDevices removeObject:k]; }
 	[taskArr removeObjectAtIndex:idx];
 	[o_tableView reloadData];
 	
 	for(i=0;(i<[taskArr count]) && (threadsOccupied < [delegate maxThreads]);i++) {
 		NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 		XLDConverterTask *nextTask = [taskArr objectAtIndex:i];
-		if(!atomic) {
-			if(![nextTask isActive]) {
-				atomic = [nextTask isAtomic];
-				[nextTask beginConvert];
-				if(lowestActivePosition < [nextTask position]) lowestActivePosition = [nextTask position];
-				threadsOccupied += [nextTask threadsOccupied];
-			}
-		}
-		else {
-			if(![nextTask isActive] && ![nextTask isAtomic]) {
-				[nextTask beginConvert];
-				if(lowestActivePosition < [nextTask position]) lowestActivePosition = [nextTask position];
-				threadsOccupied += [nextTask threadsOccupied];
-			}
+		if(![nextTask isActive] && [self canStartTask:nextTask]) {
+			[self startTask:nextTask];
 		}
 		[pool release];
 	}
@@ -155,20 +164,8 @@ extern int XLDDarkModeSupportEnabled;
 	[progressViewArr addObject:[task progressView]];
 	[o_tableView reloadData];
 	[task showProgressInView:o_tableView row:[progressViewArr count]-1];
-	if(!atomic) {
-		if(threadsOccupied < [delegate maxThreads]) {
-			atomic = [task isAtomic];
-			[task beginConvert];
-			if(lowestActivePosition < [task position]) lowestActivePosition = [task position];
-			threadsOccupied += [task threadsOccupied];
-		}
-	}
-	else {
-		if((threadsOccupied < [delegate maxThreads]) && ![task isAtomic]) {
-			[task beginConvert];
-			if(lowestActivePosition < [task position]) lowestActivePosition = [task position];
-			threadsOccupied += [task threadsOccupied];
-		}
+	if([self canStartTask:task]) {
+		[self startTask:task];
 	}
 	[lock unlock];
 }
@@ -189,20 +186,8 @@ extern int XLDDarkModeSupportEnabled;
 		[progressViewArr addObject:[task progressView]];
 		[o_tableView reloadData];
 		[task showProgressInView:o_tableView row:[progressViewArr count]-1];
-		if(!atomic) {
-			if(threadsOccupied < [delegate maxThreads]) {
-				atomic = [task isAtomic];
-				[task beginConvert];
-				if(lowestActivePosition < [task position]) lowestActivePosition = [task position];
-				threadsOccupied += [task threadsOccupied];
-			}
-		}
-		else {
-			if((threadsOccupied < [delegate maxThreads]) && ![task isAtomic]) {
-				[task beginConvert];
-				if(lowestActivePosition < [task position]) lowestActivePosition = [task position];
-				threadsOccupied += [task threadsOccupied];
-			}
+		if([self canStartTask:task]) {
+			[self startTask:task];
 		}
 		[pool release];
 	}

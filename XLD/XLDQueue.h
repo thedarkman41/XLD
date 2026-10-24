@@ -20,7 +20,7 @@
 	IBOutlet id o_mainPanel;
 	IBOutlet id o_tableView;
 	IBOutlet id o_menu;
-	BOOL atomic;
+	NSCountedSet *busyDevices; /* device paths with a rip in progress (#631) */
 	int lowestActivePosition;
 	BOOL checkUpdateStatus;
 	int selectedRow;

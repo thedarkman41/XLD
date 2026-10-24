@@ -1428,6 +1428,16 @@ finish:
 	return [NSStringFromClass(decoderClass) isEqualToString:@"XLDCDDARipper"];
 	//return NO;
 }
+
+- (NSString *)atomicKey
+{
+	/* The resource an atomic task contends for is its optical DRIVE, not the
+	   whole application. Return this task's device path so the queue serialises
+	   only tasks that read the same drive; non-CDDA tasks return nil and never
+	   block one another. (SourceForge ticket #631) */
+	if([self isAtomic] && rippingSession) return [rippingSession devicePath];
+	return nil;
+}
 /*
 - (void)setMountOnEnd
 {

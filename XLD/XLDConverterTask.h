@@ -109,6 +109,7 @@
 - (BOOL)isActive;
 - (void)setiTunesLib:(NSString *)lib withAppName:(NSString *)appName;
 - (BOOL)isAtomic;
+- (NSString *)atomicKey;
 //- (void)setMountOnEnd;
 - (void)setTrackListForCuesheet:(NSArray *)tracks appendBOM:(BOOL)flag;
 - (void)setCDDARippingSession:(id)obj;

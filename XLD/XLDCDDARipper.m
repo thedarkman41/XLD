@@ -126,6 +126,7 @@ static void commitSecureRipperResult(cddaRipResult *result, XLDSecureRipperResul
 - (BOOL)openDisc:(xld_cdread_t *)disc
 {
 	unsigned int i, k, value;
+	if(!disc) return NO; /* SourceForge ticket #630 */
 	cdread = disc;
 	if(maxSpeed) xld_cdda_set_max_speed(cdread, maxSpeed);
 	
@@ -188,6 +189,9 @@ static void commitSecureRipperResult(cddaRipResult *result, XLDSecureRipperResul
 - (BOOL)openFile:(char *)path
 {
 	XLDCDDARippingSession *session = [XLDCDDARippingSession sessionForDevice:path];
+	/* Messaging nil returns 0, not -1, so the check below would let it pass.
+	   (SourceForge ticket #630) */
+	if(!session) return NO;
 	if([session open] == -1) return NO;
 	return [self openDisc:[session descriptor]];
 }

@@ -29,6 +29,16 @@ static NSMutableDictionary *sessions;
     return [sessions objectForKey:[NSString stringWithUTF8String:device]];
 }
 
++ (BOOL)isDeviceBusy:(NSString *)devicePath
+{
+    /* A session exists for a device path from the moment a rip opens it until
+       -destroy, so it is an authoritative per-drive busy indicator. Used to
+       gate automount and the Open Audio CD menu per drive rather than
+       app-wide. (SourceForge ticket #631) */
+    if(!devicePath) return NO;
+    return ([sessions objectForKey:devicePath] != nil);
+}
+
 - (id)initWithDevicePath:(NSString *)device
 {
     self = [super init];
@@ -60,7 +70,11 @@ static NSMutableDictionary *sessions;
 - (void)destroy
 {
     xld_cdda_close(&cdread);
-    [sessions removeObjectForKey:devicePath];
+    /* Only unregister if this object is still the registered session for the
+       device; a newer session for the same device must not be removed.
+       (SourceForge ticket #630) */
+    if([sessions objectForKey:devicePath] == self)
+        [sessions removeObjectForKey:devicePath];
 }
 
 - (XLDCDDAResult *)result
@@ -83,6 +97,11 @@ static NSMutableDictionary *sessions;
     return &cdread;
 }
 
+- (NSString *)devicePath
+{
+    return devicePath;
+}
+
 - (int)offsetCorrectionValue
 {
     return offsetCorrectionValue;
@@ -91,6 +110,23 @@ static NSMutableDictionary *sessions;
 - (void)setOffsetCorrectionValue:(int)value
 {
     offsetCorrectionValue = value;
+}
+
+- (BOOL)resolveOffsetCorrectionValueFromDrive
+{
+    /* Resolve the read offset from this session's own drive, so that discs in
+       different drives no longer share a single offset value.
+       (SourceForge ticket #629) */
+    if(!cdread.product) return NO;
+    NSDictionary *dic = [NSDictionary dictionaryWithContentsOfFile:
+        [[NSBundle mainBundle] pathForResource:@"offsetlist" ofType:@"plist"]];
+    NSString *name = [NSString stringWithUTF8String:cdread.product];
+    id value = [dic objectForKey:name];
+    if(!value && [name length] > 1)
+        value = [dic objectForKey:[name substringToIndex:[name length]-1]];
+    if(!value) return NO;
+    offsetCorrectionValue = [value intValue];
+    return YES;
 }
 
 - (int)retryCount

@@ -24,6 +24,7 @@
 
 + (XLDCDDARippingSession *)createSessionForDevice:(NSString *)device;
 + (XLDCDDARippingSession *)sessionForDevice:(const char *)device;
++ (BOOL)isDeviceBusy:(NSString *)devicePath;
 - (id)initWithDevicePath:(NSString *)device;
 - (int)open;
 - (void)close;
@@ -32,8 +33,10 @@
 - (void)setResult:(XLDCDDAResult *)obj;
 - (BOOL)allTasksFinished;
 - (xld_cdread_t *)descriptor;
+- (NSString *)devicePath;
 - (int)offsetCorrectionValue;
 - (void)setOffsetCorrectionValue:(int)value;
+- (BOOL)resolveOffsetCorrectionValueFromDrive;
 - (int)retryCount;
 - (void)setRetryCount:(int)value;
 - (xldoffset_t)firstAudioFrame;
