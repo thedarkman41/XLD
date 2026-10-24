@@ -169,6 +169,16 @@ void metadata_callback(const FLAC__StreamDecoder *decoder, const FLAC__StreamMet
 					[dat release];
 				}
 			}
+			else if(!strncasecmp((char *)comment.comments[i].entry,"copyright=",10)) {
+				/* Map the COPYRIGHT vorbis comment so it is written to the
+				   standard MP4 "cprt" atom (shown by Apple Music) instead of a
+				   freeform ----:com.apple.iTunes:COPYRIGHT atom. (ticket #622) */
+				NSString *dat = [[NSString alloc] initWithData:[NSData dataWithBytes:comment.comments[i].entry+10 length:comment.comments[i].length-10+nullFix] encoding:NSUTF8StringEncoding];
+				if(dat) {
+					[delegate->metadataDic setObject:dat forKey:XLD_METADATA_COPYRIGHT];
+					[dat release];
+				}
+			}
 			else if(!strncasecmp((char *)comment.comments[i].entry,"ISRC=",5)) {
 				NSString *dat = [[NSString alloc] initWithData:[NSData dataWithBytes:comment.comments[i].entry+5 length:comment.comments[i].length-5+nullFix] encoding:NSUTF8StringEncoding];
 				if(dat) {
