@@ -867,6 +867,45 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 
 #pragma mark IBActions
 
+- (NSString *)routedRipBaseForCueParser:(id)cueParser
+{
+	/* Route CD rips into a fixed music-library layout:
+	   - compilations        -> /Volumes/Newton/Music/Compilations
+	   - single artist/group -> /Volumes/Newton/Music/<first letter of the
+	     artist name ignoring a leading "The ">/<full artist name> */
+	NSString *root = @"/Volumes/Newton/Music";
+	BOOL comp = [cueParser isCompilation];
+	if(!comp && [[cueParser trackList] count]) {
+		id c = [[[[cueParser trackList] objectAtIndex:0] metadata] objectForKey:XLD_METADATA_COMPILATION];
+		if(c && [c boolValue]) comp = YES;
+	}
+	if(comp) return [root stringByAppendingPathComponent:@"Compilations"];
+	NSString *artist = [cueParser artist];
+	if(!artist || ![artist length]) artist = @"Unknown Artist";
+	NSString *sortName = artist;
+	if([[sortName lowercaseString] hasPrefix:@"the "]) sortName = [sortName substringFromIndex:4];
+	NSString *letter = @"#";
+	if([sortName length]) {
+		NSString *first = [[sortName substringToIndex:1] uppercaseString];
+		unichar ch = [first characterAtIndex:0];
+		if(ch >= 'A' && ch <= 'Z') letter = first;
+	}
+	NSMutableString *artistFolder = [NSMutableString stringWithString:artist];
+	[o_renamer replaceInvalidCharactersInMutableString:artistFolder];
+	return [[root stringByAppendingPathComponent:letter] stringByAppendingPathComponent:artistFolder];
+}
+
+- (NSString *)ripAlbumFolderForCueParser:(id)cueParser
+{
+	/* Album folder named "<disc title> [<output format>]", e.g. "Aftermath [FLAC]". */
+	NSString *title = ([cueParser title] && [[cueParser title] length]) ? [cueParser title] : @"Unknown Album";
+	NSMutableString *album = [NSMutableString stringWithString:title];
+	[o_renamer replaceInvalidCharactersInMutableString:album];
+	NSString *fmt = [self currentOutputFormatTitle];
+	if(!fmt) fmt = @"";
+	return [NSString stringWithFormat:@"%@ [%@]", album, fmt];
+}
+
 - (IBAction)beginDecode:(id)sender
 {
 	if (sender) {
@@ -901,7 +940,17 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		outputDir = [[cueParser fileToDecode] stringByDeletingLastPathComponent];
 	else
 		outputDir = [o_outputDir stringValue];
-	
+
+	/* CD rips go into the music-library layout; create the folder so the
+	   writability check below passes. */
+	if([[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) {
+		NSString *routed = [self routedRipBaseForCueParser:cueParser];
+		if(routed) {
+			[[NSFileManager defaultManager] createDirectoryAtPath:routed withIntermediateDirectories:YES attributes:nil error:nil];
+			outputDir = routed;
+		}
+	}
+
 	if(![[NSFileManager defaultManager] isWritableFileAtPath:outputDir]) {
 		NSOpenPanel *op = [NSOpenPanel openPanel];
 		[op setTitle:LS(@"Specify the output directory")];
@@ -1049,6 +1098,8 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		else filename = [self preferredFilenameForTrack:trk createSubDir:YES singleImageMode:singleImageMode albumArtist:[cueParser artist]];
 		[trk setDesiredFileName:[filename lastPathComponent]];
 		NSString *outputSubDir = [filename stringByDeletingLastPathComponent];
+		/* For CD rips, the album folder is "<title> [<format>]". */
+		if([[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) outputSubDir = [self ripAlbumFolderForCueParser:cueParser];
 		
 		xldoffset_t actualLength;
 		xldoffset_t actualIndex;
