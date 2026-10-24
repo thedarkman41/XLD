@@ -97,10 +97,17 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[o_outputFormatPopUp setTarget:self];
 	[o_outputFormatPopUp setAction:@selector(outputFormatChangedFromToolbar:)];
 	[[o_outputFormatPopUp menu] setDelegate:self]; /* repopulate just before it opens */
-	item = [[NSToolbarItem alloc] initWithItemIdentifier:@"OutputFormat"];
-	[item setView:o_outputFormatPopUp];
-	[item setMinSize:NSMakeSize(120,25)];
-	[item setMaxSize:NSMakeSize(240,25)];
+	/* Pull-down sized (164 x 26) and nudged up 1px (the sandbox values) by hosting
+	   it in a slightly taller container the toolbar centres. */
+	{
+		NSView *pdHost = [[[NSView alloc] initWithFrame:NSMakeRect(0,0,164,28)] autorelease];
+		[o_outputFormatPopUp setFrame:NSMakeRect(0,2,164,26)];
+		[pdHost addSubview:o_outputFormatPopUp];
+		item = [[NSToolbarItem alloc] initWithItemIdentifier:@"OutputFormat"];
+		[item setView:pdHost];
+		[item setMinSize:NSMakeSize(164,28)];
+		[item setMaxSize:NSMakeSize(164,28)];
+	}
 	[item setLabel:LS(@"Output Format")];
 	[item setPaletteLabel:LS(@"Output Format")];
 	[toolbarItems setObject:item forKey:@"OutputFormat"];
@@ -121,66 +128,21 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	}
 
 	/* Settings (opens Preferences), placed next to Transcode. */
-	item = [[NSToolbarItem alloc] initWithItemIdentifier:@"Settings"];
-	[item setLabel:LS(@"Settings")];
-	[item setPaletteLabel:LS(@"Settings")];
-	[item setImage:[NSImage imageNamed:NSImageNamePreferencesGeneral]];
-	[item setTarget:delegate];
-	[item setAction:@selector(showPreferences:)];
-	[toolbarItems setObject:item forKey:@"Settings"];
-	[item release];
+	/* Each action icon is a fixed-width custom view with a small label beneath it,
+	   so the labels show while the icons stay evenly spaced (the toolbar puts a
+	   flexible space between each). Short labels: Settings / Rip / Lookup / Edit /
+	   Burn / Locate. */
+	[toolbarItems setObject:[self labeledToolbarItem:@"Settings" label:LS(@"Settings") image:[NSImage imageNamed:NSImageNamePreferencesGeneral] target:delegate action:@selector(showPreferences:)] forKey:@"Settings"];
+	[toolbarItems setObject:[self labeledToolbarItem:@"Extract" label:LS(@"Rip") image:[[NSWorkspace sharedWorkspace] iconForDisc] target:delegate action:@selector(beginDecode:)] forKey:@"Extract"];
+	[toolbarItems setObject:[self labeledToolbarItem:@"GetMetadata" label:LS(@"Lookup") image:[[NSWorkspace sharedWorkspace] iconForNetwork] target:delegate action:@selector(cddbGetTracks:)] forKey:@"GetMetadata"];
+	[toolbarItems setObject:[self labeledToolbarItem:@"EditMetadata" label:LS(@"Edit") image:[NSImage imageNamed:@"metadata"] target:self action:@selector(editMetadata:)] forKey:@"EditMetadata"];
+	[toolbarItems setObject:[self labeledToolbarItem:@"Burn" label:LS(@"Burn") image:[[NSWorkspace sharedWorkspace] iconForBurn] target:self action:@selector(burn:)] forKey:@"Burn"];
 
-	item = [[NSToolbarItem alloc] initWithItemIdentifier:@"Extract"];
-	[item setLabel:LS(@"Extract")];
-	[item setPaletteLabel:LS(@"Extract")];
-	[item setImage:[[NSWorkspace sharedWorkspace] iconForDisc]];
-	[item setTarget:delegate];
-	[item setAction:@selector(beginDecode:)];
-	[toolbarItems setObject:item forKey:@"Extract"];
-	[item release];
-	
-	item = [[NSToolbarItem alloc] initWithItemIdentifier:@"GetMetadata"];
-	[item setLabel:LS(@"Get Metadata")];
-	[item setPaletteLabel:LS(@"Get Metadata")];
-	[item setImage:[[NSWorkspace sharedWorkspace] iconForNetwork]];
-	[item setTarget:delegate];
-	[item setAction:@selector(cddbGetTracks:)];
-	[toolbarItems setObject:item forKey:@"GetMetadata"];
-	[item release];
-	
-	item = [[NSToolbarItem alloc] initWithItemIdentifier:@"EditMetadata"];
-	[item setLabel:LS(@"Edit Metadata")];
-	[item setPaletteLabel:LS(@"Edit Metadata")];
-	[item setImage:[NSImage imageNamed:@"metadata"]];
-	[item setTarget:self];
-	[item setAction:@selector(editMetadata:)];
-	[toolbarItems setObject:item forKey:@"EditMetadata"];
-	[item release];
-	
-	item = [[NSToolbarItem alloc] initWithItemIdentifier:@"Burn"];
-	[item setLabel:LS(@"Burn CD")];
-	[item setPaletteLabel:LS(@"Burn CD")];
-	[item setImage:[[NSWorkspace sharedWorkspace] iconForBurn]];
-	[item setTarget:self];
-	[item setAction:@selector(burn:)];
-	[toolbarItems setObject:item forKey:@"Burn"];
-	[item release];
-	
-	/* Plain icons without the circular/rounded button background. */
-	{
-		NSArray *plainIdents = [NSArray arrayWithObjects:@"Settings",@"Extract",@"GetMetadata",@"EditMetadata",@"Burn",nil];
-		int pi;
-		for(pi=0;pi<[plainIdents count];pi++) {
-			NSToolbarItem *ti = [toolbarItems objectForKey:[plainIdents objectAtIndex:pi]];
-			if([ti respondsToSelector:@selector(setBordered:)]) [ti setBordered:NO];
-		}
-	}
-
-	NSToolbar *theBar = [[NSToolbar alloc] initWithIdentifier:@"XLDDiscViewToolbar5"];
+	NSToolbar *theBar = [[NSToolbar alloc] initWithIdentifier:@"XLDDiscViewToolbar7"];
 	[theBar setDelegate:self];
 	[theBar setAllowsUserCustomization:YES];
 	[theBar setAutosavesConfiguration:YES];
-	[theBar setDisplayMode:NSToolbarDisplayModeIconOnly]; /* hide the text under the icons */
+	[theBar setDisplayMode:NSToolbarDisplayModeIconOnly]; /* labels live inside the custom views */
 	[o_window setToolbar:theBar];
 	[theBar release];
 	{
@@ -518,10 +480,19 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[o_accurateRipStatus setStringValue:arStateString];
 	[o_totalTime setStringValue:[NSString stringWithFormat:LS(@"%@ Total"), framesToMSFStr([cueParser totalFrames], [cueParser samplerate])]];
 	[o_verify setHidden:YES]; /* Verify button removed */
-	if([cueParser fileToDecode] && [[cueParser fileToDecode] hasPrefix:@"/dev/disk"])
-		[[toolbarItems objectForKey:@"Extract"] setLabel:LS(@"Extract")];
-	else 
-		[[toolbarItems objectForKey:@"Extract"] setLabel:LS(@"Transcode")];
+	{
+		/* "Rip" for a disc, "Transcode" for a folder/file. The visible label now
+		   lives in the item's custom view, so update the text field there too (not
+		   just the item's label, which the IconOnly toolbar no longer shows). */
+		BOOL isDisc = ([cueParser fileToDecode] && [[cueParser fileToDecode] hasPrefix:@"/dev/disk"]);
+		NSString *ripLabel = isDisc ? LS(@"Rip") : LS(@"Transcode");
+		NSToolbarItem *exItem = [toolbarItems objectForKey:@"Extract"];
+		[exItem setLabel:ripLabel];
+		NSEnumerator *se = [[[exItem view] subviews] objectEnumerator];
+		NSView *sub;
+		while((sub = [se nextObject]))
+			if([sub isKindOfClass:[NSTextField class]]) [(NSTextField *)sub setStringValue:ripLabel];
+	}
 
 	[self removeCheckboxes];
 	checkArray = [[cueParser checkList] retain];
@@ -900,7 +871,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 
 -(NSArray *) toolbarDefaultItemIdentifiers:(NSToolbar*)toolbar
 {
-	return [NSArray arrayWithObjects:@"Open",@"OutputFormat",
+	return [NSArray arrayWithObjects:@"OutputFormat",
 		NSToolbarFlexibleSpaceItemIdentifier,@"Settings",
 		NSToolbarFlexibleSpaceItemIdentifier,@"Extract",
 		NSToolbarFlexibleSpaceItemIdentifier,@"GetMetadata",
@@ -912,6 +883,52 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 -(NSArray *) toolbarAllowedItemIdentifiers:(NSToolbar*)toolbar
 {
 	return [NSArray arrayWithObjects:@"Open",@"ExtractionMode",@"OutputFormat",@"Settings",@"Extract",@"GetMetadata",@"EditMetadata",@"Burn",NSToolbarFlexibleSpaceItemIdentifier,NSToolbarSpaceItemIdentifier,NSToolbarSeparatorItemIdentifier,nil];
+}
+
+/* Build a toolbar item whose view is an icon with a small centred label beneath,
+   at a fixed size so every action item is the same width and the icons stay
+   evenly spaced. The label text lives in the view (toolbar display mode is
+   IconOnly), and a borderless button carries the action. */
+- (NSToolbarItem *)labeledToolbarItem:(NSString *)ident label:(NSString *)label image:(NSImage *)img target:(id)t action:(SEL)a
+{
+	const CGFloat W = 56.0, H = 48.0, ICON = 23.0, LABELH = 13.0, GAP = 2.0, ICONS_DOWN = 5.0;
+	/* The icon+label block is centred on the view, then nudged down by ICONS_DOWN
+	   (the offset dialled in in the sandbox) so the icons sit where they look right
+	   against the output-format pull-down. */
+	CGFloat unitBottom = (H - (ICON + GAP + LABELH))/2.0 - ICONS_DOWN;
+	NSToolbarItem *item = [[[NSToolbarItem alloc] initWithItemIdentifier:ident] autorelease];
+	[item setLabel:label];
+	[item setPaletteLabel:label];
+	/* No rounded/pill background ring around the view (the plain-icon look). */
+	if([item respondsToSelector:@selector(setBordered:)]) [item setBordered:NO];
+	NSView *v = [[[NSView alloc] initWithFrame:NSMakeRect(0,0,W,H)] autorelease];
+	NSButton *btn = [[[NSButton alloc] initWithFrame:NSMakeRect((W-ICON)/2.0, unitBottom + LABELH + GAP, ICON, ICON)] autorelease];
+	[btn setButtonType:NSMomentaryChangeButton];
+	[btn setBordered:NO];
+	[btn setImage:img];
+	[btn setImagePosition:NSImageOnly];
+	[[btn cell] setImageScaling:NSImageScaleProportionallyUpOrDown];
+	[btn setTarget:t];
+	[btn setAction:a];
+	[btn setToolTip:label];
+	[btn setAutoresizingMask:NSViewMinXMargin|NSViewMaxXMargin];
+	[v addSubview:btn];
+	NSTextField *lbl = [[[NSTextField alloc] initWithFrame:NSMakeRect(0.0, unitBottom, W, LABELH)] autorelease];
+	[lbl setStringValue:label];
+	[lbl setEditable:NO];
+	[lbl setSelectable:NO];
+	[lbl setBordered:NO];
+	[lbl setBezeled:NO];
+	[lbl setDrawsBackground:NO];
+	[lbl setAlignment:NSCenterTextAlignment];
+	[lbl setFont:[NSFont systemFontOfSize:9.0]];
+	[lbl setTextColor:[NSColor secondaryLabelColor]];
+	[[lbl cell] setLineBreakMode:NSLineBreakByClipping];
+	[v addSubview:lbl];
+	[item setView:v];
+	[item setMinSize:NSMakeSize(W,H)];
+	[item setMaxSize:NSMakeSize(W,H)];
+	return item;
 }
 
 /* Repopulate the output-format pull-down from Preferences just before it opens. */

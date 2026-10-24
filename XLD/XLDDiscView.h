@@ -65,5 +65,6 @@
 - (void)loadPrefs;
 - (BOOL)burning;
 - (id)imageView;
+- (NSToolbarItem *)labeledToolbarItem:(NSString *)ident label:(NSString *)label image:(NSImage *)img target:(id)t action:(SEL)a;
 
 @end
