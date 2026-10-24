@@ -725,7 +725,11 @@ static const int fontSizeForSpeed = 9;
 			return;
 		}
 		if(fixed) [track setFrames:-1];
-		if ([encoderTask respondsToSelector:@selector(threadsOccupied)]) {
+		/* A CD rip is drive-bound: it stays at one thread for queue accounting so
+		   another DRIVE can rip at the same time (same-drive tracks are still
+		   serialised by the atomicKey). Only non-rip conversions adopt the
+		   encoder's thread count, which caps how many run at once. */
+		if (![self isAtomic] && [encoderTask respondsToSelector:@selector(threadsOccupied)]) {
 			threadsOccupied = [encoderTask threadsOccupied];
 		}
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= 1090
@@ -775,7 +779,7 @@ static const int fontSizeForSpeed = 9;
 				fail++;
 			}
 			else {
-				if ([tmpEncoderTask respondsToSelector:@selector(threadsOccupied)]) {
+				if (![self isAtomic] && [tmpEncoderTask respondsToSelector:@selector(threadsOccupied)]) {
 					int threads = [tmpEncoderTask threadsOccupied];
 					if (threads > threadsOccupied) threadsOccupied = threads;
 				}
