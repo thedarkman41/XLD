@@ -79,6 +79,22 @@
 		rect.size.width = x;
 		rect.size.height = y;
 		NSFrameRect(rect);
+		/* Inset shadow around the inside edge, so the cover reads as a raised
+		   tile with a little depth. */
+		[NSGraphicsContext saveGraphicsState];
+		[[NSBezierPath bezierPathWithRect:rect] addClip];
+		NSBezierPath *innerPath = [NSBezierPath bezierPathWithRect:NSInsetRect(rect, -14, -14)];
+		[innerPath appendBezierPathWithRect:rect];
+		[innerPath setWindingRule:NSEvenOddWindingRule];
+		NSShadow *innerShadow = [[NSShadow alloc] init];
+		[innerShadow setShadowColor:[[NSColor blackColor] colorWithAlphaComponent:0.55]];
+		[innerShadow setShadowOffset:NSMakeSize(0, 0)];
+		[innerShadow setShadowBlurRadius:6.0];
+		[innerShadow set];
+		[[NSColor blackColor] set];
+		[innerPath fill];
+		[innerShadow release];
+		[NSGraphicsContext restoreGraphicsState];
 		if(badge) {
 			NSDictionary *attr = [NSDictionary dictionaryWithObjectsAndKeys:[NSColor whiteColor],NSForegroundColorAttributeName,[NSFont systemFontOfSize:9],NSFontAttributeName,nil];
 			NSSize size = [badge sizeWithAttributes:attr];
