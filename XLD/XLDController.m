@@ -5117,6 +5117,31 @@ fail:
 
 - (void)applicationDidFinishLaunching: (NSNotification *)notification
 {
+    /* Single instance: if another copy of XLD is already running (e.g. macOS
+       relaunched the app when a disc was inserted), bring that one forward and
+       quit this one, so inserting a disc never opens a second window. The running
+       instance's disk-appeared callback shows the newly inserted disc itself. */
+    {
+        NSRunningApplication *me = [NSRunningApplication currentApplication];
+        NSArray *sameApps = [NSRunningApplication runningApplicationsWithBundleIdentifier:[[NSBundle mainBundle] bundleIdentifier]];
+        NSEnumerator *e = [sameApps objectEnumerator];
+        NSRunningApplication *other;
+        while((other = [e nextObject])) {
+            if([other processIdentifier] == [me processIdentifier]) continue;
+            if([other isTerminated]) continue; /* a dying instance is no instance */
+            NSDate *myDate = [me launchDate], *otherDate = [other launchDate];
+            BOOL otherIsOlder = (myDate && otherDate) ? ([otherDate compare:myDate] == NSOrderedAscending)
+                                                       : ([other processIdentifier] < [me processIdentifier]);
+            if(otherIsOlder) {
+                [other activateWithOptions:NSApplicationActivateAllWindows];
+                /* exit() rather than -terminate:: this runs before prefs are loaded,
+                   and -terminate: would invoke applicationShouldTerminate:'s savePrefs,
+                   writing nib-default values over the user's real preferences. */
+                exit(0);
+            }
+        }
+    }
+
     NSUserDefaults* defs = [NSUserDefaults standardUserDefaults];
     NSString *plistPath = [@"~/Library/Preferences/jp.tmkk.XLD.plist" stringByExpandingTildeInPath];
     NSString *backupPath = [@"~/Library/Application Support/XLD/XLD.plist.backup" stringByExpandingTildeInPath];
