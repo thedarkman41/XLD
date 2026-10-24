@@ -23,7 +23,11 @@
 	IBOutlet id o_verify;
 	IBOutlet id o_totalTime;
 	NSPopUpButton *o_extractionMode;
-	
+	NSPopUpButton *o_outputFormatPopUp;
+	NSMenu *o_openToolbarMenu;
+	NSMutableArray *ejectButtons;
+	NSRect titleFrame0;
+
 	id delegate;
 	NSString *splitPosition;
 	NSMutableDictionary *toolbarItems;
@@ -42,6 +46,10 @@
 - (IBAction)editMetadata:(id)sender;
 - (IBAction)clearImage:(id)sender;
 - (IBAction)extractionModeChanged:(id)sender;
+- (IBAction)outputFormatChangedFromToolbar:(id)sender;
+- (void)syncOutputFormatPopUp;
+- (IBAction)toggleAccurateRip:(id)sender;
+- (IBAction)ejectDiscClicked:(id)sender;
 - (IBAction)verify:(id)sender;
 - (id)initWithDelegate:(id)del;
 - (void)openCueParser:(id)parser;

@@ -233,4 +233,10 @@
 - (id)imageView;
 - (void)imageDataDownloaded:(NSData *)imageData;
 - (void)openFolder:(NSString *)dir offset:(xldoffset_t)offset prepended:(BOOL)prepended;
+/* Main-window toolbar helpers (output-format pulldown + Settings button) */
+- (IBAction)showPreferences:(id)sender;
+- (NSArray *)insertedAudioCDTitles;
+- (NSArray *)outputFormatTitles;
+- (NSString *)currentOutputFormatTitle;
+- (void)selectOutputFormatWithTitle:(NSString *)title;
 @end

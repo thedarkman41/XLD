@@ -648,7 +648,6 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	[util setMail:[o_cddbMail stringValue]];
 	if(useProxy) [util setProxyServer:[o_cddbProxyServer stringValue] port:[o_cddbProxyServerPort intValue] user:[o_cddbProxyUser stringValue] passwd:[o_cddbProxyPassword stringValue]];
 	int ret = [util query];
-	//NSLog(@"%d",ret);
 	id hasMetadata = [[[[cueParser trackList] objectAtIndex:0] metadata] objectForKey:@"HasMetadata"];
 	if(ret == 0) {
 		[util readCDDBWithInfo:nil];
@@ -662,11 +661,13 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		}
 		else {
 			NSBeginInformationalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB not found"));
-			if([util asin] && [util coverURL]) {
-				[[discView imageView] loadImageFromASIN:[util asin] andAlternateURL:[util coverURL]];
-			}
-			else if([util coverURL]) {
-				[[discView imageView] loadImageFromURL:[util coverURL]];
+			/* Use MusicBrainz (Cover Art Archive) artwork, not Amazon. Fall back
+			   to a MusicBrainz release match even when the text metadata came
+			   from FreeDB/CDDB. */
+			{
+				NSURL *art = [util coverURL];
+				if(!art) art = [util musicBrainzCoverURL];
+				if(art) [[discView imageView] loadImageFromURL:art];
 			}
 		}
 		[util release];
@@ -684,11 +685,13 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		}
 		else {
 			NSBeginCriticalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB connection failure"));
-			if([util asin] && [util coverURL]) {
-				[[discView imageView] loadImageFromASIN:[util asin] andAlternateURL:[util coverURL]];
-			}
-			else if([util coverURL]) {
-				[[discView imageView] loadImageFromURL:[util coverURL]];
+			/* Use MusicBrainz (Cover Art Archive) artwork, not Amazon. Fall back
+			   to a MusicBrainz release match even when the text metadata came
+			   from FreeDB/CDDB. */
+			{
+				NSURL *art = [util coverURL];
+				if(!art) art = [util musicBrainzCoverURL];
+				if(art) [[discView imageView] loadImageFromURL:art];
 			}
 		}
 		[util release];
@@ -714,11 +717,13 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			[self performSelectorOnMainThread:@selector(beginDecode:) withObject:nil waitUntilDone:NO];
 		}
 		else {
-			if([util asin] && [util coverURL]) {
-				[[discView imageView] loadImageFromASIN:[util asin] andAlternateURL:[util coverURL]];
-			}
-			else if([util coverURL]) {
-				[[discView imageView] loadImageFromURL:[util coverURL]];
+			/* Use MusicBrainz (Cover Art Archive) artwork, not Amazon. Fall back
+			   to a MusicBrainz release match even when the text metadata came
+			   from FreeDB/CDDB. */
+			{
+				NSURL *art = [util coverURL];
+				if(!art) art = [util musicBrainzCoverURL];
+				if(art) [[discView imageView] loadImageFromURL:art];
 			}
 			if(result != XLDCDDBSuccess) {
 				NSBeginCriticalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB connection failure"));
@@ -754,6 +759,32 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	}
 }
 
+- (void)fetchMusicBrainzCoverInBackground:(id)cueParser
+{
+	[NSThread detachNewThreadSelector:@selector(fetchMusicBrainzCoverThread:) toTarget:self withObject:cueParser];
+}
+
+- (void)fetchMusicBrainzCoverThread:(id)cueParser
+{
+	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
+	[u setTracks:[cueParser trackList] totalFrame:(int)[cueParser totalFrames]];
+	NSURL *art = [u musicBrainzCoverURL];
+	if(art) {
+		NSData *imgData = [NSData dataWithContentsOfURL:art];
+		if(imgData && [imgData length] > 0 && ![cueParser coverData]) {
+			NSImage *img = [[NSImage alloc] initWithData:imgData];
+			if(img && [img isValid]) {
+				[cueParser setCoverData:imgData];
+				[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+			}
+			if(img) [img release];
+		}
+	}
+	[u release];
+	[pool release];
+}
+
 - (void)openParsedDisc:(id)cueParser originalFile:(NSString *)filename
 {
 	NSArray *coverArtFileListArray = [self coverArtFileListArray];
@@ -777,6 +808,11 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	[discView openCueParser:cueParser];
 	
 	if([[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) {
+		/* Always try to fetch cover art from MusicBrainz for an optical disc that
+		   has none, even when automatic metadata query is off (e.g. the disc's
+		   title came from CD-Text). Runs on a background thread so the disc view
+		   is not blocked; the image is applied on the main thread. */
+		if(![cueParser coverData]) [self fetchMusicBrainzCoverInBackground:cueParser];
 		if([o_autoQueryCDDB state] == NSOnState) {
 			[self cddbGetTracksWithAutoStart:(([o_autoMountDisc state] == NSOnState) && ([o_autoStartRipping state] == NSOnState)) ? YES : NO isManualQuery:NO];
 		}
@@ -936,6 +972,9 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		if(ripperMode != kRipperModeBurst && [o_useC2Pointer state] == NSOnState) ripperMode |= kRipperModeC2;
 		[rippingSession setRipperMode:ripperMode];
 		[rippingSession setOffsetCorrectionValue:[o_offsetCorrectionValue intValue]];
+		/* Give each disc its own drive's read offset instead of the single
+		   shared prefs field. (SourceForge ticket #629) */
+		if([o_autoSetOffsetValue state] == NSOnState) [rippingSession resolveOffsetCorrectionValueFromDrive];
 		[rippingSession setRetryCount:[o_maxRetryCount intValue]];
 		[rippingSession setFirstAudioFrame:[cueParser firstAudioFrame]];
 		[rippingSession setLastAudioFrame:[cueParser lastAudioFrame]];
@@ -946,7 +985,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		[resultObj setDeviceStr:[cueParser fileToDecode]];
 		[resultObj setDriveAndMediaInfoFromDescriptor:[rippingSession descriptor]];
 		[resultObj setRipperMode:ripperMode
-				 offsetCorrention:[o_offsetCorrectionValue intValue]
+				 offsetCorrention:[rippingSession offsetCorrectionValue]
 					   retryCount:[o_maxRetryCount intValue]
 				 useAccurateRipDB:(([o_queryAccurateRip state] == NSOnState) && ([discView extractionMode] != 1) && ([dbData state] != kXLDAccurateRipDBStateNetworkError))
 			   checkInconsistency:([o_verifySuspiciousSector state] == NSOnState)
@@ -1236,6 +1275,30 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	[self openRawFileWithDefaultPath:nil];
 }
 
+- (IBAction)showPreferences:(id)sender
+{
+	/* Open the Preferences/Settings panel (same panel the menu item opens). */
+	[o_prefPane makeKeyAndOrderFront:sender];
+}
+
+- (NSArray *)outputFormatTitles
+{
+	return [o_formatList itemTitles];
+}
+
+- (NSString *)currentOutputFormatTitle
+{
+	return [o_formatList titleOfSelectedItem];
+}
+
+- (void)selectOutputFormatWithTitle:(NSString *)title
+{
+	if(title && [o_formatList itemWithTitle:title]) {
+		[o_formatList selectItemWithTitle:title];
+		[self formatChanged:o_formatList];
+	}
+}
+
 - (IBAction)formatChanged:(id)sender
 {
 	if([[o_formatList selectedItem] tag] == 1) [o_formatOptionButton setEnabled:YES];
@@ -1466,12 +1529,52 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	[NSThread detachNewThreadSelector:@selector(readPreGapOfDisc:) toTarget:self withObject:args];
 }
 
+- (NSArray *)insertedAudioCDTitles
+{
+	/* Display names of currently-inserted audio CDs, for the toolbar Open menu. */
+	NSMutableArray *titles = [NSMutableArray array];
+	NSArray *mountedVolumes = [[NSWorkspace sharedWorkspace] mountedLocalVolumePaths];
+	int i, numVolumes = [mountedVolumes count];
+	for(i=0;i<numVolumes;i++) {
+		NSString *mntPath = [mountedVolumes objectAtIndex:i];
+		struct statfs statDisc;
+		if(statfs([mntPath UTF8String], &statDisc) != 0) continue;
+		if(strcmp(statDisc.f_fstypename, "cddafs")) continue;
+		[titles addObject:[[NSFileManager defaultManager] displayNameAtPath:mntPath]];
+	}
+	return titles;
+}
+
+- (BOOL)isOpticalMenuItemDriveFree:(NSMenuItem *)menuItem
+{
+	/* Enable an "Open Audio CD" item unless the drive holding THAT disc is
+	   already ripping, so other drives' discs stay openable. Resolves the
+	   item's volume (by display name) to its device and asks the sessions
+	   dictionary. Fails open: if the volume can't be resolved, stay enabled.
+	   (SourceForge ticket #631) */
+	NSString *title = [menuItem title];
+	if(!title) return YES;
+	NSArray *mountedVolumes = [[NSWorkspace sharedWorkspace] mountedLocalVolumePaths];
+	int i, numVolumes = [mountedVolumes count];
+	for(i=0;i<numVolumes;i++) {
+		NSString *mntPath = [mountedVolumes objectAtIndex:i];
+		struct statfs statDisc;
+		if(statfs([mntPath UTF8String], &statDisc) != 0) continue;
+		if(strcmp(statDisc.f_fstypename, "cddafs")) continue;
+		if(![[[NSFileManager defaultManager] displayNameAtPath:mntPath] isEqualToString:title]) continue;
+		return ![XLDCDDARippingSession isDeviceBusy:[NSString stringWithUTF8String:statDisc.f_mntfromname]];
+	}
+	return YES;
+}
+
 - (void)updateCDDAListAndMount:(NSString *)device
 {
 	//NSLog(@"updateCDDAListAndMount called with %@",device);
 	BOOL automount = NO;
 	NSMenuItem *discToMount = nil;
-	if(device && !driveIsBusy && !openingFiles && ([o_autoMountDisc state] == NSOnState)) automount = YES;
+	/* Gate automount on THIS drive only, not app-wide, so a disc inserted into
+	   a free drive still auto-opens while another drive is ripping. (#631) */
+	if(device && ![XLDCDDARippingSession isDeviceBusy:[@"/dev/" stringByAppendingString:device]] && !openingFiles && ([o_autoMountDisc state] == NSOnState)) automount = YES;
 	if(device) [self makeDriveOffsetList];
 	
 	int i,n=0;
@@ -1884,6 +1987,16 @@ end:
 	}
 	else if(sender)
 		NSRunAlertPanel(LS(@"Making priority higher than the current value"), LS(@"Please restart XLD to take effect."), @"OK", nil, nil);
+}
+
+- (void)ejectDiscByDevice:(NSString *)devPath
+{
+	/* Eject the disc identified by its device node (used by the per-row eject
+	   buttons in the source list). */
+	if(!devPath) return;
+	NSString *d = devPath;
+	if([d hasPrefix:@"/dev/rdisk"]) d = [@"/dev/disk" stringByAppendingString:[d substringFromIndex:10]];
+	[opticalDriveManager ejectDisc:d];
 }
 
 - (IBAction)ejectDisc:(id)sender
@@ -4144,6 +4257,30 @@ end:
 {
 	launched = YES;
 	if([queue count]) [self processQueue];
+	else [self scanOpticalDrivesOnLaunch];
+}
+
+- (void)scanOpticalDrivesOnLaunch
+{
+	/* On launch, scan every optical drive for an inserted audio CD and open
+	   each one, so each disc shows in the left column (with a disc icon) and
+	   gets an automatic title + artwork lookup via openParsedDisc:. With more
+	   than one drive, every drive's disc is opened. If no disc is present, show
+	   the empty-state window instead. */
+	NSArray *cds = [self insertedAudioCDTitles];
+	if(![cds count]) {
+		if(![discView cueParser]) {
+			[discView reloadData];
+			[[discView window] makeKeyAndOrderFront:nil];
+		}
+		return;
+	}
+	int i;
+	for(i=0;i<[cds count];i++) {
+		NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:[cds objectAtIndex:i] action:nil keyEquivalent:@""];
+		[self readCDDA:item];
+		[item release];
+	}
 }
 
 - (NSStringEncoding)encoding
@@ -4499,11 +4636,13 @@ end:
 			[self performSelectorOnMainThread:@selector(beginDecode:) withObject:nil waitUntilDone:NO];
 		}
 		else {
-			if([util asin] && [util coverURL]) {
-				[[discView imageView] loadImageFromASIN:[util asin] andAlternateURL:[util coverURL]];
-			}
-			else if([util coverURL]) {
-				[[discView imageView] loadImageFromURL:[util coverURL]];
+			/* Use MusicBrainz (Cover Art Archive) artwork, not Amazon. Fall back
+			   to a MusicBrainz release match even when the text metadata came
+			   from FreeDB/CDDB. */
+			{
+				NSURL *art = [util coverURL];
+				if(!art) art = [util musicBrainzCoverURL];
+				if(art) [[discView imageView] loadImageFromURL:art];
 			}
 			if(result != XLDCDDBSuccess) {
 				NSBeginCriticalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB connection failure"));
@@ -5055,7 +5194,7 @@ willBeInsertedIntoToolbar:(BOOL)willBeInserted
 	else if([menuItem action] == @selector(getMetadataFromURL:))
         return [[discView window] isVisible] && (cueParser != nil);
 	else if([menuItem action] == @selector(readCDDA:))
-        return (driveIsBusy == NO);
+        return [self isOpticalMenuItemDriveFree:menuItem];
 	else if([menuItem action] == @selector(gotoMBReleasePage:))
         return [[discView window] isVisible] && (cueParser != nil);
     return YES;

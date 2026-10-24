@@ -58,6 +58,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	}
 	
 	delegate = [del retain];
+	[o_verify setHidden:YES]; /* Verify button removed */
 	toolbarItems = [[NSMutableDictionary alloc] init];
 	parserArray = [[NSMutableArray alloc] init];
 	
@@ -81,7 +82,50 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[item setAction:@selector(extractionModeChanged:)];
 	[toolbarItems setObject:item forKey:@"ExtractionMode"];
 	[item release];
-	
+
+	/* Output-format pull-down (mirrors the format list in Preferences). */
+	o_outputFormatPopUp = [[NSPopUpButton alloc] init];
+	if(floor(NSAppKitVersionNumber) > NSAppKitVersionNumber10_4) {
+		[o_outputFormatPopUp setBezelStyle:NSTexturedRoundedBezelStyle];
+	}
+	[[o_outputFormatPopUp cell] setArrowPosition:NSPopUpArrowAtBottom];
+	[[o_outputFormatPopUp cell] setFont:[NSFont systemFontOfSize:12]];
+	[o_outputFormatPopUp setTarget:self];
+	[o_outputFormatPopUp setAction:@selector(outputFormatChangedFromToolbar:)];
+	[[o_outputFormatPopUp menu] setDelegate:self]; /* repopulate just before it opens */
+	item = [[NSToolbarItem alloc] initWithItemIdentifier:@"OutputFormat"];
+	[item setView:o_outputFormatPopUp];
+	[item setMinSize:NSMakeSize(120,25)];
+	[item setMaxSize:NSMakeSize(240,25)];
+	[item setLabel:LS(@"Output Format")];
+	[item setPaletteLabel:LS(@"Output Format")];
+	[toolbarItems setObject:item forKey:@"OutputFormat"];
+	[item release];
+
+	/* Open: pick an inserted Audio CD or a folder/files to transcode. */
+	o_openToolbarMenu = [[NSMenu alloc] initWithTitle:@"Open"];
+	[o_openToolbarMenu setDelegate:self]; /* built on demand in menuNeedsUpdate: */
+	if([NSMenuToolbarItem class]) {
+		NSMenuToolbarItem *openItem = [[NSMenuToolbarItem alloc] initWithItemIdentifier:@"Open"];
+		[openItem setLabel:LS(@"Open")];
+		[openItem setPaletteLabel:LS(@"Open")];
+		[openItem setImage:[NSImage imageNamed:NSImageNameFolder]];
+		[openItem setMenu:o_openToolbarMenu];
+		[openItem setShowsIndicator:YES];
+		[toolbarItems setObject:openItem forKey:@"Open"];
+		[openItem release];
+	}
+
+	/* Settings (opens Preferences), placed next to Transcode. */
+	item = [[NSToolbarItem alloc] initWithItemIdentifier:@"Settings"];
+	[item setLabel:LS(@"Settings")];
+	[item setPaletteLabel:LS(@"Settings")];
+	[item setImage:[NSImage imageNamed:NSImageNamePreferencesGeneral]];
+	[item setTarget:delegate];
+	[item setAction:@selector(showPreferences:)];
+	[toolbarItems setObject:item forKey:@"Settings"];
+	[item release];
+
 	item = [[NSToolbarItem alloc] initWithItemIdentifier:@"Extract"];
 	[item setLabel:LS(@"Extract")];
 	[item setPaletteLabel:LS(@"Extract")];
@@ -118,10 +162,21 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[toolbarItems setObject:item forKey:@"Burn"];
 	[item release];
 	
-	NSToolbar *theBar = [[NSToolbar alloc] initWithIdentifier:@"XLDDiscViewToolbar"];
+	/* Plain icons without the circular/rounded button background. */
+	{
+		NSArray *plainIdents = [NSArray arrayWithObjects:@"Settings",@"Extract",@"GetMetadata",@"EditMetadata",@"Burn",nil];
+		int pi;
+		for(pi=0;pi<[plainIdents count];pi++) {
+			NSToolbarItem *ti = [toolbarItems objectForKey:[plainIdents objectAtIndex:pi]];
+			if([ti respondsToSelector:@selector(setBordered:)]) [ti setBordered:NO];
+		}
+	}
+
+	NSToolbar *theBar = [[NSToolbar alloc] initWithIdentifier:@"XLDDiscViewToolbar5"];
 	[theBar setDelegate:self];
 	[theBar setAllowsUserCustomization:YES];
 	[theBar setAutosavesConfiguration:YES];
+	[theBar setDisplayMode:NSToolbarDisplayModeIconOnly]; /* hide the text under the icons */
 	[o_window setToolbar:theBar];
 	[theBar release];
 	{
@@ -173,11 +228,71 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_5
 	if(XLDDarkModeSupportEnabled) {
+		/* Make the whole content view layer-backed consistently. Previously only
+		   the two scroll containers were layer-backed, leaving their siblings
+		   (the cover-art / info header) non-layer-backed; mixing the two modes
+		   produces redraw trails ("ghost rectangles") when the window is
+		   resized in dark mode. A single layer-backed ancestor composites all
+		   subviews uniformly and clears the artifact. */
+		[[o_window contentView] setWantsLayer:YES];
 		[[[o_trackTable superview] superview] setWantsLayer:YES];
 		[[[o_selectorTable superview] superview] setWantsLayer:YES];
 	}
 	[o_splitView setDividerStyle:NSSplitViewDividerStyleThin];
 #endif
+	[self syncOutputFormatPopUp];
+
+	/* Move the album title / artist labels to the TOP of the header area
+	   (they were anchored near the bottom, beside the cover art). */
+	if(o_titleText && o_artistText) {
+		NSView *titleView = o_titleText;
+		NSView *artistView = o_artistText;
+		NSView *container = [titleView superview];
+		CGFloat top = [container bounds].size.height;
+		BOOL flipped = [container isFlipped];
+		NSRect tf = [titleView frame];
+		NSRect af = [artistView frame];
+		CGFloat margin = 34.0; /* inset from the top so the text sits inside the field */
+		if(flipped) {
+			tf.origin.y = margin;
+			af.origin.y = NSMaxY(tf) + 2.0;
+		} else {
+			tf.origin.y = top - margin - tf.size.height;
+			af.origin.y = tf.origin.y - 2.0 - af.size.height;
+		}
+		[titleView setFrame:tf];
+		[artistView setFrame:af];
+		titleFrame0 = tf; /* remember normal title frame for the empty-state toggle */
+	}
+
+	/* Open wider by default so longer titles are visible. */
+	{
+		NSRect wf = [o_window frame];
+		if(wf.size.width < 1180) {
+			wf.size.width = 1180;
+			[o_window setFrame:wf display:NO];
+		}
+	}
+
+	/* Make the "AccurateRip:" status in the bottom-left clickable: clicking it
+	   toggles the indicator between YES and NO. We overlay a transparent button
+	   covering the status label and its caption. */
+	if(o_accurateRipStatus) {
+		NSView *statusSuper = [o_accurateRipStatus superview];
+		NSRect sr = [o_accurateRipStatus frame];
+		NSRect btnFrame = NSMakeRect(0, sr.origin.y - 2, NSMaxX(sr) + 4, sr.size.height + 4);
+		NSButton *arButton = [[NSButton alloc] initWithFrame:btnFrame];
+		[arButton setButtonType:NSMomentaryChangeButton];
+		[arButton setBordered:NO];
+		[arButton setTransparent:YES];
+		[arButton setTitle:@""];
+		[arButton setTarget:self];
+		[arButton setAction:@selector(toggleAccurateRip:)];
+		[arButton setAutoresizingMask:NSViewMaxXMargin|NSViewMaxYMargin];
+		[statusSuper addSubview:arButton positioned:NSWindowAbove relativeTo:nil];
+		[arButton release];
+	}
+
 	[o_window display];
 	//[o_window makeKeyAndOrderFront:self];
 	proposedRow = -1;
@@ -188,6 +303,8 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 {
 	[delegate release];
 	[toolbarItems release];
+	[o_openToolbarMenu release];
+	[ejectButtons release];
 	[parserArray release];
 	if(checkArray) [checkArray release];
 	[super dealloc];
@@ -218,18 +335,88 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	}
 }
 
+- (void)removeEjectButtons
+{
+	int i;
+	for(i=0;i<[ejectButtons count];i++) [[ejectButtons objectAtIndex:i] removeFromSuperview];
+	[ejectButtons removeAllObjects];
+}
+
+- (void)layoutEjectButtons
+{
+	[self removeEjectButtons];
+	if(!ejectButtons) ejectButtons = [[NSMutableArray alloc] init];
+	int i;
+	for(i=0;i<[parserArray count];i++) {
+		NSString *dev = [[parserArray objectAtIndex:i] fileToDecode];
+		if(!dev || ![dev hasPrefix:@"/dev/disk"]) continue; /* optical discs only */
+		NSRect rowRect = [o_selectorTable rectOfRow:i];
+		CGFloat tableW = [o_selectorTable bounds].size.width;
+		/* Place the eject control at the far-right edge of the row, in its own
+		   dark rounded chip, so it sits clear of the selection pill. */
+		NSRect frame = NSMakeRect(tableW-23, rowRect.origin.y + (rowRect.size.height-18)/2.0, 20, 18);
+		NSButton *btn = [[NSButton alloc] initWithFrame:frame];
+		[btn setButtonType:NSMomentaryChangeButton];
+		[btn setBordered:NO];
+		[[btn cell] setImagePosition:NSNoImage];
+		[btn setWantsLayer:YES];
+		[[btn layer] setBackgroundColor:[[NSColor colorWithCalibratedWhite:0.12 alpha:0.9] CGColor]];
+		[[btn layer] setCornerRadius:5.0];
+		/* Visible eject glyph; device path carried in the identifier for the action. */
+		NSDictionary *attrs = [NSDictionary dictionaryWithObjectsAndKeys:
+			[NSColor whiteColor], NSForegroundColorAttributeName,
+			[NSFont systemFontOfSize:12], NSFontAttributeName, nil];
+		[btn setAttributedTitle:[[[NSAttributedString alloc] initWithString:@"⏏" attributes:attrs] autorelease]];
+		[btn setIdentifier:dev];
+		[btn setToolTip:LS(@"Eject")];
+		[btn setTarget:self];
+		[btn setAction:@selector(ejectDiscClicked:)];
+		[btn setAutoresizingMask:NSViewMinXMargin];
+		[o_selectorTable addSubview:btn positioned:NSWindowAbove relativeTo:nil];
+		[ejectButtons addObject:btn];
+		[btn release];
+	}
+}
+
+- (IBAction)ejectDiscClicked:(id)sender
+{
+	if([delegate respondsToSelector:@selector(ejectDiscByDevice:)])
+		[delegate ejectDiscByDevice:[sender identifier]];
+}
+
 - (void)reloadData
 {
+	[self syncOutputFormatPopUp];
 	[o_selectorTable reloadData];
 	[o_trackTable reloadData];
 	if(![parserArray count]) {
 		[self removeCheckboxes];
+		[self removeEjectButtons];
+		/* Empty state: prompt the user to pick a source. */
+		[o_imageView setDefaultString:@""];
+		[o_imageView clearImage];
+		/* Centered prompt spanning the whole header field. */
+		if(!NSEqualRects(titleFrame0, NSZeroRect)) {
+			NSRect cf = [[o_titleText superview] bounds];
+			[o_titleText setFrame:NSMakeRect(16, titleFrame0.origin.y, cf.size.width-32, titleFrame0.size.height)];
+		}
+		[o_titleText setAlignment:NSTextAlignmentCenter];
+		[o_titleText setStringValue:LS(@"Insert Audio CD or select folder for conversion")];
+		[o_titleText setToolTip:nil];
+		[o_artistText setStringValue:@""];
+		if(o_accurateRipStatus) [o_accurateRipStatus setStringValue:LS(@"NO")];
+		[o_totalTime setStringValue:[NSString stringWithFormat:LS(@"%@ Total"), @"--:--:--"]];
+		[o_window setTitle:@""];
 		return;
 	}
-	
+	[self layoutEjectButtons];
+
 	id cueParser = [parserArray objectAtIndex:[o_selectorTable selectedRow]];
+	[o_imageView setDefaultString:@"No Image"]; /* restore normal placeholder */
 	if(![cueParser coverData]) [o_imageView clearImage];
 	else if([cueParser coverData] != [o_imageView imageData]) [o_imageView setImageData:[cueParser coverData]];
+	if(!NSEqualRects(titleFrame0, NSZeroRect)) [o_titleText setFrame:titleFrame0];
+	[o_titleText setAlignment:NSTextAlignmentLeft];
 	[o_titleText setStringValue:[cueParser title]];
 	[o_titleText setToolTip:[cueParser title]];
 	[o_artistText setStringValue:[cueParser artist]];
@@ -244,15 +431,13 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	}
 	else [o_window setRepresentedFilename:@""];
 	XLDAccurateRipDBState arState = [[cueParser accurateRipData] state];
-	NSString *arStateString = @"???";
+	NSString *arStateString = LS(@"NO"); /* default to NO rather than ??? */
 	if (arState == kXLDAccurateRipDBStateFound) arStateString = LS(@"YES");
 	else if (arState == kXLDAccurateRipDBStateNotFound) arStateString = LS(@"NO");
 	else if (arState == kXLDAccurateRipDBStateNetworkError) arStateString = @"ERR";
 	[o_accurateRipStatus setStringValue:arStateString];
 	[o_totalTime setStringValue:[NSString stringWithFormat:LS(@"%@ Total"), framesToMSFStr([cueParser totalFrames], [cueParser samplerate])]];
-	if (arState == kXLDAccurateRipDBStateFound && [cueParser fileToDecode] && ![[cueParser fileToDecode] hasPrefix:@"/dev/disk"])
-		[o_verify setHidden:NO];
-	else [o_verify setHidden:YES];
+	[o_verify setHidden:YES]; /* Verify button removed */
 	if([cueParser fileToDecode] && [[cueParser fileToDecode] hasPrefix:@"/dev/disk"])
 		[[toolbarItems objectForKey:@"Extract"] setLabel:LS(@"Extract")];
 	else 
@@ -350,9 +535,10 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	for(i=0;i<[parserArray count];i++) {
 		if([[[parserArray objectAtIndex:i] fileToDecode] isEqualToString:path]) {
 			[parserArray removeObjectAtIndex:i];
-			if(![parserArray count]) {
-				[o_window close];
-			}
+			/* When the last source is removed, keep the window open showing the
+			   empty-state prompt instead of closing it. Closing the now-empty
+			   window again (red button / Cmd-W) dismisses it via
+			   windowShouldClose:. */
 			[self reloadData];
 			break;
 		}
@@ -634,16 +820,80 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 
 -(NSArray *) toolbarDefaultItemIdentifiers:(NSToolbar*)toolbar
 {
-	return [NSArray arrayWithObjects:@"ExtractionMode",NSToolbarFlexibleSpaceItemIdentifier,@"Extract",@"GetMetadata",@"EditMetadata",@"Burn",nil];
+	return [NSArray arrayWithObjects:@"Open",@"OutputFormat",
+		NSToolbarFlexibleSpaceItemIdentifier,@"Settings",
+		NSToolbarFlexibleSpaceItemIdentifier,@"Extract",
+		NSToolbarFlexibleSpaceItemIdentifier,@"GetMetadata",
+		NSToolbarFlexibleSpaceItemIdentifier,@"EditMetadata",
+		NSToolbarFlexibleSpaceItemIdentifier,@"Burn",
+		NSToolbarFlexibleSpaceItemIdentifier,nil];
 }
 
 -(NSArray *) toolbarAllowedItemIdentifiers:(NSToolbar*)toolbar
 {
-	return [NSArray arrayWithObjects:@"ExtractionMode",@"Extract",@"GetMetadata",@"EditMetadata",@"Burn",NSToolbarFlexibleSpaceItemIdentifier,NSToolbarSpaceItemIdentifier,NSToolbarSeparatorItemIdentifier,nil];
+	return [NSArray arrayWithObjects:@"Open",@"ExtractionMode",@"OutputFormat",@"Settings",@"Extract",@"GetMetadata",@"EditMetadata",@"Burn",NSToolbarFlexibleSpaceItemIdentifier,NSToolbarSpaceItemIdentifier,NSToolbarSeparatorItemIdentifier,nil];
+}
+
+/* Repopulate the output-format pull-down from Preferences just before it opens. */
+- (void)menuNeedsUpdate:(NSMenu *)menu
+{
+	if(o_outputFormatPopUp && menu == [o_outputFormatPopUp menu]) [self syncOutputFormatPopUp];
+	else if(menu == o_openToolbarMenu) [self buildOpenMenu:menu];
+}
+
+- (void)buildOpenMenu:(NSMenu *)menu
+{
+	[menu removeAllItems];
+	/* Inserted audio CDs (each opens via the controller's readCDDA:). */
+	NSArray *cds = [delegate respondsToSelector:@selector(insertedAudioCDTitles)] ? [delegate insertedAudioCDTitles] : nil;
+	int i;
+	for(i=0;i<[cds count];i++) {
+		/* readCDDA: opens the disc named by the item's title, so use the bare
+		   volume name as the title. */
+		NSMenuItem *it = [[NSMenuItem alloc] initWithTitle:[cds objectAtIndex:i] action:@selector(readCDDA:) keyEquivalent:@""];
+		[it setTarget:delegate];
+		[menu addItem:it];
+		[it release];
+	}
+	if(![cds count]) {
+		NSMenuItem *none = [[NSMenuItem alloc] initWithTitle:LS(@"No Audio CD Inserted") action:nil keyEquivalent:@""];
+		[none setEnabled:NO]; [menu addItem:none]; [none release];
+	}
+	if([cds count]) [menu addItem:[NSMenuItem separatorItem]];
+	NSMenuItem *folder = [[NSMenuItem alloc] initWithTitle:LS(@"Open Folder As a Disc...") action:@selector(openFolderAsDisc:) keyEquivalent:@""];
+	[folder setTarget:delegate]; [menu addItem:folder]; [folder release];
+	NSMenuItem *file = [[NSMenuItem alloc] initWithTitle:LS(@"Open File(s)...") action:@selector(openFile:) keyEquivalent:@""];
+	[file setTarget:delegate]; [menu addItem:file]; [file release];
+}
+
+- (void)syncOutputFormatPopUp
+{
+	if(!o_outputFormatPopUp || !delegate) return;
+	NSArray *titles = [delegate outputFormatTitles];
+	NSString *current = [delegate currentOutputFormatTitle];
+	[o_outputFormatPopUp removeAllItems];
+	if(titles) [o_outputFormatPopUp addItemsWithTitles:titles];
+	if(current && [o_outputFormatPopUp itemWithTitle:current]) [o_outputFormatPopUp selectItemWithTitle:current];
+}
+
+- (IBAction)outputFormatChangedFromToolbar:(id)sender
+{
+	[delegate selectOutputFormatWithTitle:[o_outputFormatPopUp titleOfSelectedItem]];
+}
+
+- (IBAction)toggleAccurateRip:(id)sender
+{
+	/* Toggle the AccurateRip status indicator between YES and NO. */
+	NSString *cur = [o_accurateRipStatus stringValue];
+	[o_accurateRipStatus setStringValue:[cur isEqualToString:LS(@"YES")] ? LS(@"NO") : LS(@"YES")];
 }
 
 - (BOOL)validateToolbarItem:(NSToolbarItem *)theItem
 {
+	/* Settings and the output-format pull-down are always available. */
+	if([[theItem itemIdentifier] isEqualToString:@"Settings"]) return YES;
+	if([[theItem itemIdentifier] isEqualToString:@"OutputFormat"]) return YES;
+	if([[theItem itemIdentifier] isEqualToString:@"Open"]) return YES;
 	int selected = [o_selectorTable selectedRow];
 	if(selected < 0) return NO;
 	if([[theItem itemIdentifier] isEqualToString:@"EditMetadata"]) return ([self cueParser] != nil);
@@ -682,6 +932,8 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[self setSplitViewPosition: o_splitView position: splitPosition];
 	[splitPosition release];
 	splitPosition = nil;
+	/* Clear any stale pixels left by live resize when layer-backed in dark mode. */
+	if(XLDDarkModeSupportEnabled) [[o_window contentView] setNeedsDisplay:YES];
 }
 
 - (int)numberOfRowsInTableView:(NSTableView *)aTableView
