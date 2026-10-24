@@ -163,6 +163,8 @@
 	BOOL ejected;
 	NSString *musicAppName;
 	NSTimeInterval lastClickTime;
+	BOOL forceFullMBTag;
+	NSMutableDictionary *spotOnFolderByDevice;
 }
 - (IBAction)beginDecode:(id)sender;
 - (IBAction)setOutputDir:(id)sender;

@@ -785,6 +785,43 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	[pool release];
 }
 
+- (void)applyMusicBrainzMetadataToDisc:(id)cueParser
+{
+	/* Force every track of an optical disc to carry full MusicBrainz metadata
+	   before it is ripped, independent of the automatic-query service preference
+	   (which defaults to FreeDB). Idempotent per disc: a private marker on the
+	   first track keeps a re-rip from querying again. Runs synchronously on the
+	   calling thread (the util's network calls each have a 20s timeout) so the
+	   track metadata is fully populated before rip tasks are built. */
+	NSArray *trackList = [cueParser trackList];
+	if(![trackList count]) return;
+	id firstMeta = [[trackList objectAtIndex:0] metadata];
+	if([firstMeta objectForKey:@"XLDMBTagged"]) return;
+	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
+	[u setPreferredService:XLDCDDBMusicBrainzPreferred];
+	[u setTracks:trackList totalFrame:(int)[cueParser totalFrames]];
+	NSString *releaseID = [u firstMusicBrainzReleaseID];
+	if(releaseID) {
+		forceFullMBTag = YES;
+		/* "MusicBrainz_fromURL" selects the ambiguous match path, so the release is
+		   accepted even when the disc has no registered MusicBrainz disc id (a fuzzy
+		   TOC match) — otherwise no medium matches and no track gets tagged. */
+		XLDCDDBResult r = [u readCDDBWithInfo:[NSArray arrayWithObjects:@"MusicBrainz_fromURL",@"",releaseID,nil]];
+		forceFullMBTag = NO;
+		/* Only mark the disc tagged once metadata actually landed (a release id on
+		   the first track), so a miss can be retried on a later rip. */
+		if(r == XLDCDDBSuccess && [firstMeta objectForKey:XLD_METADATA_MB_ALBUMID]) {
+			[firstMeta setObject:[NSNumber numberWithBool:YES] forKey:@"XLDMBTagged"];
+			if([self canSetCompilationFlag] && [cueParser isCompilation]) {
+				int i;
+				for(i=0;i<[trackList count];i++) [[[trackList objectAtIndex:i] metadata] setObject:[NSNumber numberWithBool:YES] forKey:XLD_METADATA_COMPILATION];
+			}
+			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+		}
+	}
+	[u release];
+}
+
 - (void)openParsedDisc:(id)cueParser originalFile:(NSString *)filename
 {
 	NSArray *coverArtFileListArray = [self coverArtFileListArray];
@@ -918,6 +955,10 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	id resultObj = nil;
 	XLDCDDARippingSession *rippingSession = nil;
 	id cueParser = [discView cueParser];
+	/* Before ripping an optical disc, make sure every track carries full
+	   MusicBrainz metadata (used both for the file tags and, below, for the
+	   SpotON folder-icon hand-off). */
+	if([[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) [self applyMusicBrainzMetadataToDisc:cueParser];
 	BOOL singleImageMode = NO;
 	if([discView extractionMode] == 2) {
 		trackList = [cueParser trackListForSingleFile];
@@ -1082,7 +1123,18 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	}
 	
 	NSMutableArray *taskArray = [[NSMutableArray alloc] init];
-	
+
+	/* Remember this disc's album folder, keyed by device, so that when the rip
+	   finishes (discRippedWithResult:) we can hand the folder to SpotOn for its
+	   cover-art Finder icons. Only for optical-disc rips. */
+	if([[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) {
+		NSString *albumFolder = outputDir;
+		NSString *sub = [self ripAlbumFolderForCueParser:cueParser];
+		if([sub length]) albumFolder = [outputDir stringByAppendingPathComponent:sub];
+		if(!spotOnFolderByDevice) spotOnFolderByDevice = [[NSMutableDictionary alloc] init];
+		if(albumFolder) [spotOnFolderByDevice setObject:albumFolder forKey:[cueParser fileToDecode]];
+	}
+
 	for(i=0;i<[trackList count];i++) {
 		XLDTrack *trk = [trackList objectAtIndex:i];
 		if(![trk enabled]) continue; 
@@ -3618,6 +3670,11 @@ end:
 
 - (unsigned int)cddbQueryFlag
 {
+	/* Forced full MusicBrainz tagging at rip time: every text field, overwriting
+	   whatever CD-Text/FreeDB left, so every ripped file carries MusicBrainz
+	   metadata. Cover art is skipped here (fetched separately from MusicBrainz),
+	   and the query-result menu preferences are ignored for this pass. */
+	if(forceFullMBTag) return 0xffffffff ^ XLDCDDBQueryEmptyOnlyMask ^ XLDCDDBQueryCoverArtMask;
 	unsigned int flag = 0xffffffff;
 	NSMenu *submenu = [o_cddbQueryItem submenu];
 	if([[submenu itemAtIndex:0] state] == NSOffState) flag ^= XLDCDDBQueryEmptyOnlyMask;
@@ -4396,9 +4453,64 @@ end:
 	if([result isGoodRip] && ([o_quitWhenDone state] == NSOnState)) {
 		[NSApp terminate:self];
 	}
+	/* Hand the finished album folder to SpotOn so it applies cover-art Finder
+	   icons to the folder and its tracks. Good rips only; fire-and-forget on a
+	   background thread. */
+	NSString *spotOnFolder = [spotOnFolderByDevice objectForKey:[result deviceStr]];
+	if([result isGoodRip] && spotOnFolder)
+		[self performSelectorInBackground:@selector(handOffToSpotOnThread:) withObject:spotOnFolder];
+	if([result deviceStr]) [spotOnFolderByDevice removeObjectForKey:[result deviceStr]];
 	[NSApp requestUserAttention:NSInformationalRequest];
 	NSBeep();
 	driveIsBusy = NO;
+}
+
+- (BOOL)requestSpotOnIcons:(NSString *)folder token:(NSString *)token port:(int)port
+{
+	/* Percent-encode with a STRICT set: URLQueryAllowedCharacterSet leaves &, +,
+	   =, ;, ? unescaped, which SpotOn's query parser would treat as delimiters and
+	   truncate a folder like ".../Simon & Garfunkel/..." at the first space. Only
+	   unreserved characters and '/' are left literal; everything else is escaped. */
+	NSCharacterSet *safe = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/"];
+	NSString *enc = [folder stringByAddingPercentEncodingWithAllowedCharacters:safe];
+	if(!enc) return NO;
+	NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%d/api/icons?folder=%@", port, enc];
+	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+	[req setValue:token forHTTPHeaderField:@"X-SpotOn-Token"];
+	[req setTimeoutInterval:180];
+	__block BOOL ok = NO;
+	dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+	NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e){
+		if(!e && [r isKindOfClass:[NSHTTPURLResponse class]] && [(NSHTTPURLResponse *)r statusCode] == 200) ok = YES;
+		dispatch_semaphore_signal(sem);
+	}];
+	[task resume];
+	dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)185*NSEC_PER_SEC));
+	return ok;
+}
+
+- (void)handOffToSpotOnThread:(NSString *)folder
+{
+	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+	/* SpotOn's loopback API token (0600 file in its Application Support) and port
+	   (its own UserDefaults, default 8092). */
+	NSString *appSup = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) objectAtIndex:0];
+	NSString *tokenPath = [[appSup stringByAppendingPathComponent:@"SpotOn"] stringByAppendingPathComponent:@"api_token"];
+	NSString *token = [[NSString stringWithContentsOfFile:tokenPath encoding:NSUTF8StringEncoding error:nil] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	if(![token length]) { [pool release]; return; }
+	int port = 8092;
+	CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("api_port"), CFSTR("com.spoton.app"));
+	if(v) {
+		if(CFGetTypeID(v) == CFNumberGetTypeID()) { int p = 0; CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &p); if(p > 0) port = p; }
+		CFRelease(v);
+	}
+	if(![self requestSpotOnIcons:folder token:token port:port]) {
+		/* SpotOn may not be running — launch it and retry once. */
+		[[NSWorkspace sharedWorkspace] launchAppWithBundleIdentifier:@"com.spoton.app" options:NSWorkspaceLaunchWithoutActivation additionalEventParamDescriptor:nil launchIdentifier:NULL];
+		[NSThread sleepForTimeInterval:4.0];
+		[self requestSpotOnIcons:folder token:token port:port];
+	}
+	[pool release];
 }
 
 - (void)accurateRipCheckDidFinish:(id)result

@@ -67,6 +67,7 @@ typedef enum
 - (NSString *)asin;
 - (NSURL *)coverURL;
 - (NSURL *)musicBrainzCoverURL;
+- (NSString *)firstMusicBrainzReleaseID;
 - (BOOL)associateMBDiscID;
 - (void)disableFreeDB;
 
