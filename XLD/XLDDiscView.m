@@ -8,6 +8,7 @@
 
 #import <DiscRecording/DiscRecording.h>
 #import <DiscRecordingUI/DiscRecordingUI.h>
+#import <objc/runtime.h>
 #import "XLDDiscView.h"
 #import "XLDShadowedImageView.h"
 #import "XLDCustomClasses.h"
@@ -56,6 +57,9 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if([o_selectorTable respondsToSelector:@selector(setSelectionHighlightStyle:)]) {
 		[o_selectorTable setSelectionHighlightStyle:1];
 	}
+	/* Shrink the selection pill on the right so it never sits under the eject glyph. */
+	if([o_selectorTable isMemberOfClass:[NSTableView class]])
+		object_setClass(o_selectorTable, [XLDSourceTableView class]);
 	
 	delegate = [del retain];
 	[o_verify setHidden:YES]; /* Verify button removed */
@@ -354,18 +358,16 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		CGFloat tableW = [o_selectorTable bounds].size.width;
 		/* Place the eject control at the far-right edge of the row, in its own
 		   dark rounded chip, so it sits clear of the selection pill. */
-		NSRect frame = NSMakeRect(tableW-23, rowRect.origin.y + (rowRect.size.height-18)/2.0, 20, 18);
+		NSRect frame = NSMakeRect(tableW-22, rowRect.origin.y + (rowRect.size.height-18)/2.0, 20, 18);
 		NSButton *btn = [[NSButton alloc] initWithFrame:frame];
 		[btn setButtonType:NSMomentaryChangeButton];
 		[btn setBordered:NO];
 		[[btn cell] setImagePosition:NSNoImage];
-		[btn setWantsLayer:YES];
-		[[btn layer] setBackgroundColor:[[NSColor colorWithCalibratedWhite:0.12 alpha:0.9] CGColor]];
-		[[btn layer] setCornerRadius:5.0];
-		/* Visible eject glyph; device path carried in the identifier for the action. */
+		/* Visible eject glyph in the right-hand gutter (pill stops short of it);
+		   device path carried in the identifier for the action. */
 		NSDictionary *attrs = [NSDictionary dictionaryWithObjectsAndKeys:
-			[NSColor whiteColor], NSForegroundColorAttributeName,
-			[NSFont systemFontOfSize:12], NSFontAttributeName, nil];
+			[NSColor secondaryLabelColor], NSForegroundColorAttributeName,
+			[NSFont systemFontOfSize:13], NSFontAttributeName, nil];
 		[btn setAttributedTitle:[[[NSAttributedString alloc] initWithString:@"⏏" attributes:attrs] autorelease]];
 		[btn setIdentifier:dev];
 		[btn setToolTip:LS(@"Eject")];

@@ -168,3 +168,9 @@
 - (BOOL)setResourceValue:(id)value forKey:(NSString *)key error:(NSError **)error;
 @end
 #endif
+
+/* Source list whose selection pill stops short of the right edge, leaving room
+   for the per-row eject glyph so the pill never sits under it. Applied to the
+   disc list by ISA-swizzling the existing table (no added ivars). */
+@interface XLDSourceTableView : NSTableView
+@end

@@ -871,3 +871,15 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 
 
 @end
+
+#define XLD_EJECT_GUTTER 26.0
+@implementation XLDSourceTableView
+/* Narrow every row so the source-list selection pill (which follows the row
+   rect) ends before the eject glyph that sits in the right-hand gutter. */
+- (NSRect)rectOfRow:(NSInteger)row
+{
+	NSRect r = [super rectOfRow:row];
+	if(r.size.width > XLD_EJECT_GUTTER + 20.0) r.size.width -= XLD_EJECT_GUTTER;
+	return r;
+}
+@end
