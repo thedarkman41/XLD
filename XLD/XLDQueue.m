@@ -143,7 +143,17 @@ extern int XLDDarkModeSupportEnabled;
 	}
 	if(rippingSession) {
 		if(result && result->pending) result->pending = NO;
-		if([rippingSession allTasksFinished]) {
+		/* Only finalise/destroy this disc's ripping session once NO other queued
+		   task still references it. Several tracks of one disc share one session;
+		   "Cancel All Tasks" runs convertFinished: for all of them in a tight loop,
+		   and without this guard the first one to see allTasksFinished would destroy
+		   the session while the others still hold it, so their convertFinished:
+		   messaged freed memory and crashed. */
+		BOOL othersUseSession = NO;
+		for(i=0;i<[taskArr count];i++) {
+			if([[taskArr objectAtIndex:i] rippingSession] == rippingSession) { othersUseSession = YES; break; }
+		}
+		if(!othersUseSession && [rippingSession allTasksFinished]) {
 			XLDCDDAResult *resultObj = [[rippingSession result] retain];
 			[rippingSession destroy];
 			[delegate discRippedWithResult:resultObj];
