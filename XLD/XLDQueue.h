@@ -28,6 +28,7 @@
 
 - (id)initWithDelegate:(id)del;
 - (IBAction)test:(id)sender;
+- (NSMenu *)contextMenuForTask:(id)task;
 - (void)convertFinished:(id)task;
 - (void)addTask:(id)task;
 - (void)addTasks:(NSArray *)tasks;

@@ -60,20 +60,48 @@ static const int fontSizeForSpeed = 9;
 {
 	[self init];
 	queue = [q retain];
-	
-	[queue setMenuForItem:progress];
-	[queue setMenuForItem:statusField];
-	[queue setMenuForItem:nameField];
-	[queue setMenuForItem:speedField];
-	[queue setMenuForItem:superview];
-	
+
+	/* A per-task context menu (the shared one plus a "Locate in Finder" item that
+	   reveals THIS task's output in Finder). */
+	NSMenu *menu = [queue contextMenuForTask:self];
+	[progress setMenu:menu];
+	[statusField setMenu:menu];
+	[nameField setMenu:menu];
+	[speedField setMenu:menu];
+	[superview setMenu:menu];
+
 	return self;
+}
+
+- (IBAction)locateInFinder:(id)sender
+{
+	/* Reveal this task's output in Finder: the output file if it exists yet,
+	   otherwise its output folder. */
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSString *file = ([outputPathStrArray count]) ? [outputPathStrArray objectAtIndex:0] : nil;
+	if(file && [fm fileExistsAtPath:file])
+		[[NSWorkspace sharedWorkspace] selectFile:file inFileViewerRootedAtPath:[file stringByDeletingLastPathComponent]];
+	else if([outDir length] && [fm fileExistsAtPath:outDir])
+		[[NSWorkspace sharedWorkspace] selectFile:nil inFileViewerRootedAtPath:outDir];
+	else
+		NSBeep();
 }
 
 - (void)dealloc
 {
 	//NSLog(@"task dealloc");
 	//[self hideProgress];
+	/* The per-task context menu's "Locate in Finder" item targets this task, but
+	   the progress-list views that hold the menu can outlive the task (they stay
+	   until the queue drains, and error rows stay indefinitely). NSMenuItem does
+	   not retain its target, so clear it now to avoid a dangling-pointer message
+	   when a leftover row's menu is validated/opened. */
+	{
+		NSMenu *ctxMenu = [superview menu];
+		int mi;
+		for(mi=0;mi<[ctxMenu numberOfItems];mi++)
+			if([[ctxMenu itemAtIndex:mi] target] == self) [[ctxMenu itemAtIndex:mi] setTarget:nil];
+	}
 	[nameField release];
 	[statusField release];
 	[speedField release];

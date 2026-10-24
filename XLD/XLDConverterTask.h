@@ -100,6 +100,7 @@
 - (void)setRawOffset:(int)offset;
 - (void)setInputPath:(NSString *)path;
 - (NSString *)outputDir;
+- (IBAction)locateInFinder:(id)sender;
 - (void)setOutputDir:(NSString *)path;
 - (void)setTagWritable:(BOOL)flag;
 - (void)setTrack:(XLDTrack *)t;

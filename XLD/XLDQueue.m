@@ -260,6 +260,19 @@ extern int XLDDarkModeSupportEnabled;
 	[item setMenu:o_menu];
 }
 
+/* Context menu for one task's progress rows: a copy of the shared menu plus a
+   "Locate in Finder" item that reveals that task's output (targeted at the task
+   so the right-clicked row resolves correctly). */
+- (NSMenu *)contextMenuForTask:(id)task
+{
+	NSMenu *m = o_menu ? [[o_menu copy] autorelease] : [[[NSMenu alloc] initWithTitle:@""] autorelease];
+	if([m numberOfItems] > 0) [m addItem:[NSMenuItem separatorItem]];
+	NSMenuItem *locate = [[[NSMenuItem alloc] initWithTitle:LS(@"Locate in Finder") action:@selector(locateInFinder:) keyEquivalent:@""] autorelease];
+	[locate setTarget:task];
+	[m addItem:locate];
+	return m;
+}
+
 - (void)windowWillClose:(NSNotification *)notification
 {
 	if(threadsOccupied) return;
