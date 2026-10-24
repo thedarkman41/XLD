@@ -27,6 +27,7 @@
 	NSMenu *o_openToolbarMenu;
 	NSMutableArray *ejectButtons;
 	NSRect titleFrame0;
+	NSTextField *o_emptyStateLabel;
 
 	id delegate;
 	NSString *splitPosition;

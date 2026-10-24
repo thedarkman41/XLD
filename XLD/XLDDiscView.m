@@ -309,6 +309,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[toolbarItems release];
 	[o_openToolbarMenu release];
 	[ejectButtons release];
+	[o_emptyStateLabel release];
 	[parserArray release];
 	if(checkArray) [checkArray release];
 	[super dealloc];
@@ -337,6 +338,30 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		[button setFrame:frame];
 		[o_trackTable addSubview:button];
 	}
+}
+
+- (void)showEmptyStatePrompt:(BOOL)show
+{
+	if(!o_titleText) return;
+	NSView *container = [o_titleText superview];
+	if(show) {
+		if(!o_emptyStateLabel) {
+			NSRect cf = [container bounds];
+			o_emptyStateLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(10, (cf.size.height-24)/2.0, cf.size.width-20, 24)];
+			[o_emptyStateLabel setEditable:NO];
+			[o_emptyStateLabel setSelectable:NO];
+			[o_emptyStateLabel setBordered:NO];
+			[o_emptyStateLabel setDrawsBackground:NO];
+			[o_emptyStateLabel setAlignment:NSTextAlignmentCenter];
+			[o_emptyStateLabel setFont:[NSFont boldSystemFontOfSize:14]];
+			[o_emptyStateLabel setTextColor:[NSColor secondaryLabelColor]];
+			[o_emptyStateLabel setStringValue:LS(@"Insert Audio CD or select folder for conversion")];
+			[o_emptyStateLabel setAutoresizingMask:NSViewWidthSizable|NSViewMinYMargin|NSViewMaxYMargin];
+			[container addSubview:o_emptyStateLabel];
+		}
+		[o_emptyStateLabel setHidden:NO];
+	}
+	else [o_emptyStateLabel setHidden:YES];
 }
 
 - (void)removeEjectButtons
@@ -397,15 +422,12 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		/* Empty state: prompt the user to pick a source. */
 		[o_imageView setDefaultString:@""];
 		[o_imageView clearImage];
-		/* Centered prompt spanning the whole header field. */
-		if(!NSEqualRects(titleFrame0, NSZeroRect)) {
-			NSRect cf = [[o_titleText superview] bounds];
-			[o_titleText setFrame:NSMakeRect(16, titleFrame0.origin.y, cf.size.width-32, titleFrame0.size.height)];
-		}
-		[o_titleText setAlignment:NSTextAlignmentCenter];
-		[o_titleText setStringValue:LS(@"Insert Audio CD or select folder for conversion")];
+		/* Centered prompt in its own label; leave the real title/artist fields
+		   untouched so their layout never shifts. */
+		[o_titleText setStringValue:@""];
 		[o_titleText setToolTip:nil];
 		[o_artistText setStringValue:@""];
+		[self showEmptyStatePrompt:YES];
 		if(o_accurateRipStatus) [o_accurateRipStatus setStringValue:LS(@"NO")];
 		[o_totalTime setStringValue:[NSString stringWithFormat:LS(@"%@ Total"), @"--:--:--"]];
 		[o_window setTitle:@""];
@@ -417,8 +439,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[o_imageView setDefaultString:@"No Image"]; /* restore normal placeholder */
 	if(![cueParser coverData]) [o_imageView clearImage];
 	else if([cueParser coverData] != [o_imageView imageData]) [o_imageView setImageData:[cueParser coverData]];
-	if(!NSEqualRects(titleFrame0, NSZeroRect)) [o_titleText setFrame:titleFrame0];
-	[o_titleText setAlignment:NSTextAlignmentLeft];
+	[self showEmptyStatePrompt:NO];
 	[o_titleText setStringValue:[cueParser title]];
 	[o_titleText setToolTip:[cueParser title]];
 	[o_artistText setStringValue:[cueParser artist]];
