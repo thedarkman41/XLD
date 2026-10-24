@@ -15,7 +15,47 @@
 
 @implementation XLDMusicBrainzRelease
 
++ (NSString *)releaseGroupIDForReleaseID:(NSString *)releaseid
+{
+	/* Ask MusicBrainz which release-group a release belongs to, so cover art can
+	   fall back to the group when the specific release has no front image. */
+	if(!releaseid) return nil;
+	NSString *urlStr = [NSString stringWithFormat:@"https://musicbrainz.org/ws/2/release/%@?inc=release-groups&fmt=json", releaseid];
+	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+	[req setValue:[NSString stringWithFormat:@"XLD/%@ ( https://tmkk.undo.jp/xld/ )",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"]] forHTTPHeaderField:@"User-Agent"];
+	__block NSData *result = nil;
+	dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+	NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err){
+		if(data) result = [data retain];
+		dispatch_semaphore_signal(sem);
+	}];
+	[task resume];
+	dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)20*NSEC_PER_SEC));
+	NSString *rgid = nil;
+	if(result) {
+		id json = [NSJSONSerialization JSONObjectWithData:result options:0 error:nil];
+		if([json isKindOfClass:[NSDictionary class]]) {
+			id rg = [json objectForKey:@"release-group"];
+			if([rg isKindOfClass:[NSDictionary class]]) rgid = [[[rg objectForKey:@"id"] retain] autorelease];
+		}
+		[result release];
+	}
+	return rgid;
+}
+
 + (NSURL *)coverURLFromReleaseID:(NSString *)releaseid
+{
+	/* Try the specific release first, then fall back to its release-group (where
+	   many covers, especially for compilations, actually live). */
+	NSURL *coverURL = [self coverURLFromCAAEntity:[NSString stringWithFormat:@"release/%@", releaseid]];
+	if(!coverURL) {
+		NSString *rgid = [self releaseGroupIDForReleaseID:releaseid];
+		if(rgid) coverURL = [self coverURLFromCAAEntity:[NSString stringWithFormat:@"release-group/%@", rgid]];
+	}
+	return coverURL;
+}
+
++ (NSURL *)coverURLFromCAAEntity:(NSString *)entity
 {
 	NSURL *coverURL = nil;
 	/* cover art information
@@ -28,7 +68,7 @@
 		useHttps = NO;
 	}
 #endif
-	CFURLRef url = CFURLCreateWithString(NULL, (CFStringRef)[NSString stringWithFormat:@"%@://coverartarchive.org/release/%@/front", useHttps ? @"https" : @"http", releaseid], NULL);
+	CFURLRef url = CFURLCreateWithString(NULL, (CFStringRef)[NSString stringWithFormat:@"%@://coverartarchive.org/%@/front", useHttps ? @"https" : @"http", entity], NULL);
 	//NSLog(@"%@",[(NSURL*)url description]);
 	CFHTTPMessageRef httpRequest = CFHTTPMessageCreateRequest(NULL, CFSTR("HEAD"), url, kCFHTTPVersion1_1);
 	if(floor(NSAppKitVersionNumber) <= NSAppKitVersionNumber10_4) {
@@ -38,6 +78,11 @@
 		sysctl(sels,2,&darwin,&size,NULL,0);
 		NSBundle *cfnetwork = [NSBundle bundleWithPath:@"/System/Library/Frameworks/CoreServices.framework/Frameworks/CFNetwork.framework"];
 		CFHTTPMessageSetHeaderFieldValue(httpRequest,CFSTR("User-Agent"),(CFStringRef)[NSString stringWithFormat:@"XLD/%@ CFNetwork/%@ Darwin/%s",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"],[[cfnetwork infoDictionary] objectForKey:@"CFBundleVersion"],darwin]);
+	}
+	else {
+		/* MusicBrainz / Cover Art Archive ask every client to send a descriptive
+		   User-Agent; without one requests can be throttled or refused. */
+		CFHTTPMessageSetHeaderFieldValue(httpRequest,CFSTR("User-Agent"),(CFStringRef)[NSString stringWithFormat:@"XLD/%@ ( https://tmkk.undo.jp/xld/ )",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"]]);
 	}
 	CFReadStreamRef readStream = CFReadStreamCreateForHTTPRequest(NULL, httpRequest);
 	CFDictionaryRef proxyDict = SCDynamicStoreCopyProxies(NULL);

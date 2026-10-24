@@ -66,6 +66,7 @@ typedef enum
 - (void)setPreferredService:(XLDCDDBPreferredService)s;
 - (NSString *)asin;
 - (NSURL *)coverURL;
+- (NSURL *)musicBrainzCoverURL;
 - (BOOL)associateMBDiscID;
 - (void)disableFreeDB;
 

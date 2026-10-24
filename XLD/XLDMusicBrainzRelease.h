@@ -15,6 +15,8 @@
 	int threads;
 }
 + (NSURL *)coverURLFromReleaseID:(NSString *)releaseid;
++ (NSURL *)coverURLFromCAAEntity:(NSString *)entity;
++ (NSString *)releaseGroupIDForReleaseID:(NSString *)releaseid;
 - (id)initWithReleaseID:(NSString *)releaseid discID:(NSString *)discid totalTracks:(int)totalTracks totalSectors:(int)sectors ambiguous:(BOOL)ambiguous;
 - (NSDictionary *)disc;
 @end

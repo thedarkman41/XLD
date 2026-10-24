@@ -610,6 +610,50 @@ end:
 	return coverURL;
 }
 
+- (NSURL *)musicBrainzCoverURL
+{
+	/* Cover art from MusicBrainz for this disc, regardless of which service
+	   provided the text metadata. coverURLFromReleaseID also falls back to the
+	   release group. */
+	int i;
+	/* 1) MusicBrainz rows from the exact disc-id query. */
+	for(i=0;i<[queryResult count];i++) {
+		NSArray *row = [queryResult objectAtIndex:i];
+		if([row count] > 2 && [[row objectAtIndex:0] isEqualToString:@"MusicBrainz"]) {
+			NSURL *u = [XLDMusicBrainzRelease coverURLFromReleaseID:[row objectAtIndex:2]];
+			if(u) return u;
+		}
+	}
+	/* 2) Fuzzy TOC lookup. Many discs (and many compilations) match a release by
+	   track layout even though no exact disc id is registered for it, so the
+	   disc-id query above returns nothing. */
+	if(strlen(toc) > 0) {
+		NSString *urlStr = [NSString stringWithFormat:@"https://musicbrainz.org/ws/2/discid/-?toc=%s&fmt=json", toc];
+		NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+		[req setValue:[NSString stringWithFormat:@"XLD/%@ ( https://tmkk.undo.jp/xld/ )",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"]] forHTTPHeaderField:@"User-Agent"];
+		__block NSData *result = nil;
+		dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+		NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err){ if(data) result = [data retain]; dispatch_semaphore_signal(sem); }];
+		[task resume];
+		dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)20*NSEC_PER_SEC));
+		if(result) {
+			id json = [NSJSONSerialization JSONObjectWithData:result options:0 error:nil];
+			[result release];
+			if([json isKindOfClass:[NSDictionary class]]) {
+				NSArray *rels = [json objectForKey:@"releases"];
+				if([rels isKindOfClass:[NSArray class]]) {
+					for(i=0;i<[rels count];i++) {
+						NSString *rid = [[rels objectAtIndex:i] objectForKey:@"id"];
+						NSURL *u = [XLDMusicBrainzRelease coverURLFromReleaseID:rid];
+						if(u) return u;
+					}
+				}
+			}
+		}
+	}
+	return nil;
+}
+
 - (BOOL)associateMBDiscID
 {
 	int matchesMB = 0;
