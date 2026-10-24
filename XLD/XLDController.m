@@ -660,6 +660,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	id hasMetadata = [[[[cueParser trackList] objectAtIndex:0] metadata] objectForKey:@"HasMetadata"];
 	if(ret == 0) {
 		[util readCDDBWithInfo:nil];
+		if(!start) [self fillMusicBrainzTextSync:cueParser];
 		if(start && ([o_autoStartCondition state] == NSOffState || hasMetadata)) {
 			NSData *data = [util coverData];
 			if(data) {
@@ -684,6 +685,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	}
 	else if(ret == -1) {
 		[util readCDDBWithInfo:nil];
+		if(!start) [self fillMusicBrainzTextSync:cueParser];
 		if(start && ([o_autoStartCondition state] == NSOffState || hasMetadata)) {
 			NSData *data = [util coverData];
 			if(data) {
@@ -708,7 +710,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	}
 	else if(ret == 1 || (!manualQuery && [o_dontPromptForCDDB state] == NSOnState)) {
 		XLDCDDBResult result = [util readCDDBWithInfo:[[util queryResult] objectAtIndex:0]];
-		
+		if(!start) [self fillMusicBrainzTextSync:cueParser];
 		if(result == XLDCDDBSuccess) {
 			if([self canSetCompilationFlag] && [cueParser isCompilation]) {
 				int i;
@@ -776,22 +778,55 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 - (void)fetchMusicBrainzCoverThread:(id)cueParser
 {
 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
-	[u setTracks:[cueParser trackList] totalFrame:(int)[cueParser totalFrames]];
-	NSURL *art = [u musicBrainzCoverURL];
-	if(art) {
-		NSData *imgData = [NSData dataWithContentsOfURL:art];
-		if(imgData && [imgData length] > 0 && ![cueParser coverData]) {
-			NSImage *img = [[NSImage alloc] initWithData:imgData];
-			if(img && [img isValid]) {
-				[cueParser setCoverData:imgData];
-				[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+	/* Retry a few times with backoff: the MusicBrainz TOC lookup and Cover Art
+	   Archive can return nothing transiently (rate limiting, especially when
+	   several discs are scanned at once), which previously left the disc with no
+	   artwork even though one exists. */
+	int attempt;
+	for(attempt=0; attempt<3 && ![cueParser coverData]; attempt++) {
+		if(attempt > 0) [NSThread sleepForTimeInterval:(NSTimeInterval)(attempt*3)];
+		NSAutoreleasePool *inner = [[NSAutoreleasePool alloc] init];
+		XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
+		[u setTracks:[cueParser trackList] totalFrame:(int)[cueParser totalFrames]];
+		NSURL *art = [u musicBrainzCoverURL];
+		if(art) {
+			NSData *imgData = [NSData dataWithContentsOfURL:art];
+			if(imgData && [imgData length] > 0 && ![cueParser coverData]) {
+				NSImage *img = [[NSImage alloc] initWithData:imgData];
+				if(img && [img isValid]) {
+					[cueParser setCoverData:imgData];
+					[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+				}
+				if(img) [img release];
 			}
-			if(img) [img release];
 		}
+		[u release];
+		[inner release];
+	}
+	[pool release];
+}
+
+- (void)fillMusicBrainzTextSync:(id)cueParser
+{
+	/* When the preferred CDDB service found no text for an optical disc, fill the
+	   track names/artists/album from a MusicBrainz release matched by TOC (the same
+	   match that provides the cover). Fill-only, so it never clobbers metadata the
+	   primary service did provide. Runs SYNCHRONOUSLY on the main thread — like the
+	   CDDB query it follows — so the track metadata (and the fillMBText flag) are
+	   never written concurrently with the main thread reading/rendering them. */
+	NSArray *trackList = [cueParser trackList];
+	if(![trackList count] || [[[trackList objectAtIndex:0] metadata] objectForKey:XLD_METADATA_TITLE]) return;
+	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
+	[u setPreferredService:XLDCDDBMusicBrainzPreferred];
+	[u setTracks:trackList totalFrame:(int)[cueParser totalFrames]];
+	NSString *releaseID = [u firstMusicBrainzReleaseID];
+	if(releaseID) {
+		fillMBText = YES;
+		XLDCDDBResult r = [u readCDDBWithInfo:[NSArray arrayWithObjects:@"MusicBrainz_fromURL",@"",releaseID,nil]];
+		fillMBText = NO;
+		if(r == XLDCDDBSuccess) [discView reloadData];
 	}
 	[u release];
-	[pool release];
 }
 
 - (void)applyMusicBrainzMetadataToDisc:(id)cueParser
@@ -3715,6 +3750,10 @@ end:
 	   metadata. Cover art is skipped here (fetched separately from MusicBrainz),
 	   and the query-result menu preferences are ignored for this pass. */
 	if(forceFullMBTag) return 0xffffffff ^ XLDCDDBQueryEmptyOnlyMask ^ XLDCDDBQueryCoverArtMask;
+	/* Fill-only MusicBrainz TEXT pass (used on a background thread when the
+	   preferred service found nothing): every text field but only where empty, no
+	   cover (handled separately), and no UI/menu access so it is thread-safe. */
+	if(fillMBText) return 0xffffffff ^ XLDCDDBQueryCoverArtMask;
 	unsigned int flag = 0xffffffff;
 	NSMenu *submenu = [o_cddbQueryItem submenu];
 	if([[submenu itemAtIndex:0] state] == NSOffState) flag ^= XLDCDDBQueryEmptyOnlyMask;

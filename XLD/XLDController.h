@@ -164,6 +164,7 @@
 	NSString *musicAppName;
 	NSTimeInterval lastClickTime;
 	BOOL forceFullMBTag;
+	BOOL fillMBText;
 	NSMutableDictionary *spotOnFolderByDevice;
 }
 - (IBAction)beginDecode:(id)sender;
