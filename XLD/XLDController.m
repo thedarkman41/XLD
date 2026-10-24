@@ -1569,15 +1569,24 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 
 - (IBAction)readCDDA:(id)sender
 {
-	[o_detectPregapPane setTitle:LS(@"Detect Pregap")];
-	[o_detectPregapMessage setStringValue:LS(@"Detecting Pregap...")];
-	[o_detectPregapProgress setIndeterminate:NO];
-	[o_detectPregapProgress setDoubleValue:0];
-	[o_detectPregapPaneButton setHidden:YES];
-	[o_detectPregapPane center];
-	[o_detectPregapPane makeKeyAndOrderFront:nil];
-	NSArray *args = [NSArray arrayWithObjects:[sender title], [NSNumber numberWithBool:[o_dontReadSubchannel state] == NSOffState], nil];
+	/* Show the disc in the source list immediately (name + icon) with scan
+	   progress in its row, instead of a separate modal Detect Pregap dialog.
+	   The actual pregap/TOC read runs per-disc on its own thread, so several
+	   discs scan concurrently. */
+	NSString *volume = [sender title];
+	NSMutableString *tmpStr = [NSMutableString stringWithString:volume];
+	[tmpStr replaceOccurrencesOfString:@"/" withString:@":" options:0 range:NSMakeRange(0, [tmpStr length])];
+	struct statfs statDisc;
+	statfs([[@"/Volumes" stringByAppendingPathComponent:tmpStr] UTF8String], &statDisc);
+	NSString *dev = [NSString stringWithUTF8String:statDisc.f_mntfromname];
+	[discView addScanningDiscWithVolume:volume device:dev];
+	NSArray *args = [NSArray arrayWithObjects:volume, [NSNumber numberWithBool:[o_dontReadSubchannel state] == NSOffState], nil];
 	[NSThread detachNewThreadSelector:@selector(readPreGapOfDisc:) toTarget:self withObject:args];
+}
+
+- (void)postScanProgress:(NSArray *)args
+{
+	[discView updateScanProgress:[[args objectAtIndex:1] doubleValue] forDevice:[args objectAtIndex:0]];
 }
 
 - (NSArray *)insertedAudioCDTitles
@@ -3655,18 +3664,21 @@ end:
 	//NSLog(@"%s",stat.f_mntfromname);
 	
 	[opticalDriveManager unmountDisc:[NSString stringWithUTF8String:statDisc.f_mntfromname]];
-	
+	NSString *scanDev = [NSString stringWithUTF8String:statDisc.f_mntfromname]; /* for per-disc scan progress */
+
 	int i;
 	XLDCDDARippingSession *rippingSession = [XLDCDDARippingSession createSessionForDevice:[NSString stringWithUTF8String:statDisc.f_mntfromname]];
 	if([rippingSession open] != -1) {
 		xld_cdread_t *cdread = [rippingSession descriptor];
-		driveIsBusy = YES;
+		/* driveIsBusy is per-drive now via the sessions dictionary; leave the
+		   legacy flag unset so other drives can scan concurrently. */
 		if(cdread->product) {
 			NSString *driveName = [NSString stringWithUTF8String:cdread->product];
 			[self performSelectorOnMainThread:@selector(updateOffsetCorrectionValueWithDriveName:) withObject:driveName waitUntilDone:YES];
 		}
 		NSMutableArray *trackArr = [[NSMutableArray alloc] init];
 		[self updateProgressBarOnMainThread:-1 withMaxValue:cdread->numTracks-1];
+		[self performSelectorOnMainThread:@selector(postScanProgress:) withObject:[NSArray arrayWithObjects:scanDev,[NSNumber numberWithDouble:0.0],nil] waitUntilDone:NO];
 		for(i=1;i<=cdread->numTracks;i++) {
 			XLDTrack *track = [[XLDTrack alloc] init];
 			[track setIndex:xld_cdda_track_firstsector(cdread,i)*588];
@@ -3713,10 +3725,12 @@ end:
 					[[trackArr objectAtIndex:i-1] setFrames:[[trackArr objectAtIndex:i-1] frames] - cdread->tracks[i].pregap*588];
 				}
 				[self updateProgressBarOnMainThread:i withMaxValue:-1];
+				[self performSelectorOnMainThread:@selector(postScanProgress:) withObject:[NSArray arrayWithObjects:scanDev,[NSNumber numberWithDouble:(cdread->numTracks>0)?(double)(i+1)/cdread->numTracks:1.0],nil] waitUntilDone:NO];
 			}
 		}
 
 		[self updateProgressBarOnMainThread:cdread->numTracks-1 withMaxValue:-1];
+		[self performSelectorOnMainThread:@selector(postScanProgress:) withObject:[NSArray arrayWithObjects:scanDev,[NSNumber numberWithDouble:1.0],nil] waitUntilDone:NO];
 		//driveIsBusy = NO;
 		XLDCDDARipper *ripper = [[XLDCDDARipper alloc] init];
 		if(![ripper openDisc:cdread]) {
@@ -3725,6 +3739,8 @@ end:
 			[rippingSession destroy];
 			driveIsBusy = NO;
 			[opticalDriveManager mountDisc:[NSString stringWithUTF8String:statDisc.f_mntfromname]];
+			[discView performSelectorOnMainThread:@selector(removeScanningDiscForDevice:) withObject:scanDev waitUntilDone:YES];
+			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
 			[self performSelectorOnMainThread:@selector(delayedRefleshList) withObject:nil waitUntilDone:NO];
 		}
 		else {
@@ -3738,7 +3754,8 @@ end:
 		
 	}
 	else {
-		[o_detectPregapPane performSelectorOnMainThread:@selector(close) withObject:nil waitUntilDone:YES];
+		[discView performSelectorOnMainThread:@selector(removeScanningDiscForDevice:) withObject:scanDev waitUntilDone:YES];
+		[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
 		dispatch_async(dispatch_get_main_queue(), ^{
 			NSRunCriticalAlertPanel(LS(@"error"), LS(@"Device is busy"), @"OK", nil, nil);

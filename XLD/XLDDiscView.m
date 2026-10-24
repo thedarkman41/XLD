@@ -411,6 +411,63 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		[delegate ejectDiscByDevice:[sender identifier]];
 }
 
+/* --- Async disc scanning: show the disc immediately, with scan progress in its
+   source-list row, before/while the pregap is detected. --- */
+- (id)entryForDevice:(NSString *)dev
+{
+	int i;
+	for(i=0;i<[parserArray count];i++) {
+		id p = [parserArray objectAtIndex:i];
+		if([[p fileToDecode] isEqualToString:dev]) return p;
+	}
+	return nil;
+}
+
+- (void)addScanningDiscWithVolume:(NSString *)volume device:(NSString *)dev
+{
+	if([self entryForDevice:dev]) return; /* already shown (scanning or opened) */
+	XLDScanningDisc *sd = [[XLDScanningDisc alloc] initWithVolume:volume device:dev];
+	[parserArray addObject:sd];
+	[sd release];
+	[self reloadData];
+	if([parserArray count] == 1)
+		[o_selectorTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+	[o_window makeKeyAndOrderFront:nil]; /* show the disc immediately, while it scans */
+}
+
+- (void)updateScanProgress:(double)frac forDevice:(NSString *)dev
+{
+	int i;
+	for(i=0;i<[parserArray count];i++) {
+		id p = [parserArray objectAtIndex:i];
+		if([p isKindOfClass:[XLDScanningDisc class]] && [[p devicePath] isEqualToString:dev]) {
+			[p setScanProgress:frac];
+			[o_selectorTable setNeedsDisplayInRect:[o_selectorTable rectOfRow:i]];
+			return;
+		}
+	}
+}
+
+- (double)scanProgressForRow:(NSInteger)row
+{
+	if(row < 0 || row >= [parserArray count]) return -1.0;
+	id p = [parserArray objectAtIndex:row];
+	if([p isKindOfClass:[XLDScanningDisc class]]) return [p scanProgress];
+	return -1.0;
+}
+
+- (void)removeScanningDiscForDevice:(NSString *)dev
+{
+	int i;
+	for(i=0;i<[parserArray count];i++) {
+		id p = [parserArray objectAtIndex:i];
+		if([p isKindOfClass:[XLDScanningDisc class]] && [[p devicePath] isEqualToString:dev]) {
+			[parserArray removeObjectAtIndex:i];
+			return;
+		}
+	}
+}
+
 - (void)reloadData
 {
 	[self syncOutputFormatPopUp];

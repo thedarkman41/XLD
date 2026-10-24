@@ -174,3 +174,18 @@
    disc list by ISA-swizzling the existing table (no added ivars). */
 @interface XLDSourceTableView : NSTableView
 @end
+
+/* Lightweight stand-in shown in the source list while a disc's pregap/TOC is
+   still being scanned, so the disc (name + icon) appears immediately and its
+   row can show scan progress. Responds safely to the accessors the disc view
+   calls on a selected entry. */
+@interface XLDScanningDisc : NSObject {
+	NSString *volumeName;
+	NSString *devicePath;
+	double scanProgress;
+}
+- (id)initWithVolume:(NSString *)volume device:(NSString *)device;
+- (NSString *)devicePath;
+- (double)scanProgress;
+- (void)setScanProgress:(double)p;
+@end

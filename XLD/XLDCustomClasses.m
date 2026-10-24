@@ -872,6 +872,10 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 
 @end
 
+@interface NSObject (XLDScanProgressSource)
+- (double)scanProgressForRow:(NSInteger)row;
+@end
+
 #define XLD_EJECT_GUTTER 26.0
 @implementation XLDSourceTableView
 /* Narrow every row so the source-list selection pill (which follows the row
@@ -882,4 +886,52 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if(r.size.width > XLD_EJECT_GUTTER + 20.0) r.size.width -= XLD_EJECT_GUTTER;
 	return r;
 }
+/* For a disc still being scanned, turn the row's pill into a progress bar
+   (the delegate returns 0..1, or -1 when the row is not scanning). */
+- (void)drawRow:(NSInteger)row clipRect:(NSRect)clipRect
+{
+	double p = -1.0;
+	id del = [self delegate];
+	if([del respondsToSelector:@selector(scanProgressForRow:)]) p = [del scanProgressForRow:row];
+	if(p >= 0.0) {
+		NSRect r = NSInsetRect([self rectOfRow:row], 2.0, 2.0);
+		CGFloat radius = r.size.height/2.0;
+		[[NSColor colorWithCalibratedWhite:1.0 alpha:0.10] setFill];
+		[[NSBezierPath bezierPathWithRoundedRect:r xRadius:radius yRadius:radius] fill];
+		NSRect pr = r;
+		double frac = (p > 1.0) ? 1.0 : p;
+		pr.size.width = (r.size.width * frac < r.size.height) ? r.size.height : r.size.width * frac;
+		[[NSColor controlAccentColor] setFill];
+		[[NSBezierPath bezierPathWithRoundedRect:pr xRadius:radius yRadius:radius] fill];
+	}
+	[super drawRow:row clipRect:clipRect];
+}
+@end
+
+@implementation XLDScanningDisc
+- (id)initWithVolume:(NSString *)volume device:(NSString *)device
+{
+	[super init];
+	volumeName = [volume retain];
+	devicePath = [device retain];
+	scanProgress = 0.0;
+	return self;
+}
+- (void)dealloc { [volumeName release]; [devicePath release]; [super dealloc]; }
+- (NSString *)devicePath { return devicePath; }
+- (double)scanProgress { return scanProgress; }
+- (void)setScanProgress:(double)p { scanProgress = p; }
+/* Accessors the disc view may call on a (selected) source-list entry. */
+- (NSString *)title { return volumeName ? volumeName : @"Audio CD"; }
+- (NSString *)artist { return @""; }
+- (NSString *)fileToDecode { return devicePath; }
+- (NSData *)coverData { return nil; }
+- (NSString *)representedFilename { return nil; }
+- (id)accurateRipData { return nil; }
+- (NSArray *)trackList { return [NSArray array]; }
+- (NSArray *)checkList { return [NSArray array]; }
+- (xldoffset_t)totalFrames { return 0; }
+- (int)samplerate { return 44100; }
+- (BOOL)isCompilation { return NO; }
+- (BOOL)writable { return NO; }
 @end
