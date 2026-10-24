@@ -876,15 +876,38 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 - (double)scanProgressForRow:(NSInteger)row;
 @end
 
-#define XLD_EJECT_GUTTER 26.0
+/* The eject glyph button is laid out at x = bounds.width - 22 (see
+   XLDDiscView.layoutEjectButtons). The selection pill's right edge is locked to
+   that left edge, and the title cell is clamped to just inside it so a long
+   title truncates with an ellipsis INSIDE the pill rather than spilling under
+   the glyph. */
+#define XLD_EJECT_GLYPH_X 22.0
+#define XLD_EJECT_TEXT_INSET 4.0
 @implementation XLDSourceTableView
+/* Right edge of the selection pill: locked to the left edge of the eject glyph. */
+- (CGFloat)pillRightEdge
+{
+	return NSWidth([self bounds]) - XLD_EJECT_GLYPH_X;
+}
 /* Narrow every row so the source-list selection pill (which follows the row
-   rect) ends before the eject glyph that sits in the right-hand gutter. */
+   rect) ends exactly at the eject glyph that sits in the right-hand gutter. */
 - (NSRect)rectOfRow:(NSInteger)row
 {
 	NSRect r = [super rectOfRow:row];
-	if(r.size.width > XLD_EJECT_GUTTER + 20.0) r.size.width -= XLD_EJECT_GUTTER;
+	CGFloat right = [self pillRightEdge];
+	if(right > r.origin.x + 20.0) r.size.width = right - r.origin.x;
 	return r;
+}
+/* Clamp the title cell to the pill so a long name truncates inside it, with a
+   small inset so the ellipsis sits clear of the pill's rounded right edge. */
+- (NSRect)frameOfCellAtColumn:(NSInteger)column row:(NSInteger)row
+{
+	NSRect f = [super frameOfCellAtColumn:column row:row];
+	CGFloat right = [self pillRightEdge] - XLD_EJECT_TEXT_INSET;
+	if(NSMaxX(f) > right) {
+		f.size.width = (right > f.origin.x) ? (right - f.origin.x) : 0.0;
+	}
+	return f;
 }
 /* For a disc still being scanned, turn the row's pill into a progress bar
    (the delegate returns 0..1, or -1 when the row is not scanning). */
