@@ -5,7 +5,10 @@ typedef enum {
 	XLDTextTypeCueSheet
 } XLDEmbeddedCueSheetType;
 
+/* Avoid ChunkHeader clash between wavpack.h and CarbonCore AIFF.h on modern SDKs */
+#define ChunkHeader WavpackChunkHeader
 #import <wavpack/wavpack.h>
+#undef ChunkHeader
 #import "XLDDecoder.h"
 /*
 typedef unsigned char	uchar;

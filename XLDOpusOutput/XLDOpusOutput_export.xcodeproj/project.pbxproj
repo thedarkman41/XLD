@@ -275,7 +275,7 @@
 					"-lopus",
 				);
 				PREBINDING = NO;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Debug;
 		};
@@ -297,7 +297,7 @@
 					"-lopus",
 				);
 				PREBINDING = NO;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Release;
 		};

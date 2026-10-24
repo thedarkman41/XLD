@@ -260,7 +260,7 @@
 				);
 				PREBINDING = NO;
 				USER_HEADER_SEARCH_PATHS = /usr/local/include;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Debug;
 		};
@@ -278,7 +278,7 @@
 				);
 				PREBINDING = NO;
 				USER_HEADER_SEARCH_PATHS = /usr/local/include;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Release;
 		};

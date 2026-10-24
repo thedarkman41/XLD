@@ -13,6 +13,8 @@
 		BF001A280F6A1B4C0090585D /* XLDDDPParser.m in Sources */ = {isa = PBXBuildFile; fileRef = BF001A260F6A1B4C0090585D /* XLDDDPParser.m */; };
 		BF1166A7128AF2450058749F /* XLDCDDABackend.c in Sources */ = {isa = PBXBuildFile; fileRef = BF1166A6128AF2450058749F /* XLDCDDABackend.c */; };
 		BF1192010E7B91DA004BC21D /* gain_analysis.c in Sources */ = {isa = PBXBuildFile; fileRef = BF1191FF0E7B91DA004BC21D /* gain_analysis.c */; };
+		FEEDFACE000000000000B001 /* XLDGainAnalyzer.c in Sources */ = {isa = PBXBuildFile; fileRef = FEEDFACE000000000000A001 /* XLDGainAnalyzer.c */; };
+		FEEDFACE000000000000B002 /* ebur128.c in Sources */ = {isa = PBXBuildFile; fileRef = FEEDFACE000000000000A002 /* ebur128.c */; };
 		BF12FEB90A3D2F1700822690 /* XLDTtaDecoder.bundle in CopyFiles */ = {isa = PBXBuildFile; fileRef = BF3758C60A3C14090003FD0E /* XLDTtaDecoder.bundle */; };
 		BF12FEBA0A3D2F1700822690 /* XLDWavpackDecoder.bundle in CopyFiles */ = {isa = PBXBuildFile; fileRef = BF3758C70A3C14090003FD0E /* XLDWavpackDecoder.bundle */; };
 		BF12FEBB0A3D2F1700822690 /* XLDAlacDecoder.bundle in CopyFiles */ = {isa = PBXBuildFile; fileRef = BF3758C80A3C14090003FD0E /* XLDAlacDecoder.bundle */; };
@@ -149,19 +151,16 @@
 			dstSubfolderSpec = 13;
 			files = (
 				BFA7C90416296F6700C5116B /* XLDOpusOutput.bundle in CopyFiles */,
-				BFF7E77E1126FEDD00300E40 /* XLDTakDecoder.bundle in CopyFiles */,
 				BFB24D1C10BA622D00E11EBF /* XLDShortenDecoder.bundle in CopyFiles */,
-				BF2D3F980E72C5BD00BE32E5 /* XLDSparkleUpdater.bundle in CopyFiles */,
 				BF7C727C0DE34D3400325E88 /* XLDWavpackOutput.bundle in CopyFiles */,
-				BF51575B0D7D937C001C0905 /* XLDHEAACOutput.bundle in CopyFiles */,
 				BF310DBA0CE9889A005083EC /* XLDAacOutput2.bundle in CopyFiles */,
 				BFFCC5F20B0F7A62005CE0B7 /* XLDFlacDecoder.bundle in CopyFiles */,
+				BF12FF950A3D586D00822690 /* XLDVorbisOutput.bundle in CopyFiles */,
+				BF7E84310A428C43004D738A /* XLDApeDecoder.bundle in CopyFiles */,
 				BFE3A02B0ABAA9A000E64AF8 /* XLDFlacOutput.bundle in CopyFiles */,
 				BFC1702E0A4BDC4400EA040C /* XLDAlacOutput.bundle in CopyFiles */,
-				BF7E84310A428C43004D738A /* XLDApeDecoder.bundle in CopyFiles */,
 				BF7E84200A428C30004D738A /* XLDLameOutput.bundle in CopyFiles */,
 				BF23610B0A3E8B670040DAC4 /* XLDAacOutput.bundle in CopyFiles */,
-				BF12FF950A3D586D00822690 /* XLDVorbisOutput.bundle in CopyFiles */,
 				BF12FEB90A3D2F1700822690 /* XLDTtaDecoder.bundle in CopyFiles */,
 				BF12FEBA0A3D2F1700822690 /* XLDWavpackDecoder.bundle in CopyFiles */,
 				BF12FEBB0A3D2F1700822690 /* XLDAlacDecoder.bundle in CopyFiles */,
@@ -197,6 +196,8 @@
 		BF1166A8128AF24D0058749F /* XLDCDDABackend.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = XLDCDDABackend.h; sourceTree = "<group>"; };
 		BF1166AB128AF2920058749F /* cdda_paranoia.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = cdda_paranoia.h; sourceTree = "<group>"; };
 		BF1191FF0E7B91DA004BC21D /* gain_analysis.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = gain_analysis.c; sourceTree = "<group>"; };
+		FEEDFACE000000000000A001 /* XLDGainAnalyzer.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = XLDGainAnalyzer.c; sourceTree = "<group>"; };
+		FEEDFACE000000000000A002 /* ebur128.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = ebur128.c; sourceTree = "<group>"; };
 		BF1192000E7B91DA004BC21D /* gain_analysis.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = gain_analysis.h; sourceTree = "<group>"; };
 		BF12FEFF0A3D4A7D00822690 /* XLDOutput.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = XLDOutput.h; sourceTree = "<group>"; };
 		BF12FF940A3D586D00822690 /* XLDVorbisOutput.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; name = XLDVorbisOutput.bundle; path = ../XLDVorbisOutput/build/Release/XLDVorbisOutput.bundle; sourceTree = "<group>"; };
@@ -898,6 +899,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				8D11072D0486CEB800E47090 /* main.m in Sources */,
+				FEEDFACE000000000000B001 /* XLDGainAnalyzer.c in Sources */,
+				FEEDFACE000000000000B002 /* ebur128.c in Sources */,
 				BFE68D0025A73A7D000F9189 /* XLDCDDARippingSession.m in Sources */,
 				BF7DF1360A381110006893CB /* XLDController.m in Sources */,
 				BF7DF16B0A384011006893CB /* XLDDefaultOutput.m in Sources */,

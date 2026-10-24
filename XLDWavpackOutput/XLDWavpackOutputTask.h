@@ -8,7 +8,10 @@
 
 #import <Cocoa/Cocoa.h>
 #import "XLDOutputTask.h"
+/* Avoid ChunkHeader clash between wavpack.h and CarbonCore AIFF.h on modern SDKs */
+#define ChunkHeader WavpackChunkHeader
 #import <wavpack/wavpack.h>
+#undef ChunkHeader
 #import <CommonCrypto/CommonDigest.h>
 
 #define XLD_METADATA_TITLE		@"Title"

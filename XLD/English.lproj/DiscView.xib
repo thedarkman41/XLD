@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <archive type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="7.10">
 	<data>
-		<int key="IBDocument.SystemTarget">1040</int>
+		<int key="IBDocument.SystemTarget">1060</int>
 		<string key="IBDocument.SystemVersion">10K549</string>
 		<string key="IBDocument.InterfaceBuilderVersion">851</string>
 		<string key="IBDocument.AppKitVersion">1038.36</string>
@@ -650,7 +650,7 @@
 						<object class="NSTextField" id="263304718">
 							<reference key="NSNextResponder" ref="757256753"/>
 							<int key="NSvFlags">292</int>
-							<string key="NSFrame">{{5, 3}, {74, 14}}</string>
+							<string key="NSFrame">{{14, 3}, {74, 14}}</string>
 							<reference key="NSSuperview" ref="757256753"/>
 							<bool key="NSEnabled">YES</bool>
 							<object class="NSTextFieldCell" key="NSCell" id="826203676">
@@ -666,7 +666,7 @@
 						<object class="NSTextField" id="877403420">
 							<reference key="NSNextResponder" ref="757256753"/>
 							<int key="NSvFlags">292</int>
-							<string key="NSFrame">{{77, 3}, {29, 14}}</string>
+							<string key="NSFrame">{{86, 3}, {29, 14}}</string>
 							<reference key="NSSuperview" ref="757256753"/>
 							<bool key="NSEnabled">YES</bool>
 							<object class="NSTextFieldCell" key="NSCell" id="484437318">
@@ -2658,11 +2658,11 @@
 		<string key="IBDocument.TargetRuntimeIdentifier">IBCocoaFramework</string>
 		<object class="NSMutableDictionary" key="IBDocument.PluginDeclaredDependencies">
 			<string key="NS.key.0">com.apple.InterfaceBuilder.CocoaPlugin.macosx</string>
-			<integer value="1040" key="NS.object.0"/>
+			<integer value="1060" key="NS.object.0"/>
 		</object>
 		<object class="NSMutableDictionary" key="IBDocument.PluginDeclaredDependencyDefaults">
 			<string key="NS.key.0">com.apple.InterfaceBuilder.CocoaPlugin.macosx</string>
-			<integer value="1040" key="NS.object.0"/>
+			<integer value="1060" key="NS.object.0"/>
 		</object>
 		<object class="NSMutableDictionary" key="IBDocument.PluginDeclaredDevelopmentDependencies">
 			<string key="NS.key.0">com.apple.InterfaceBuilder.CocoaPlugin.InterfaceBuilder3</string>

@@ -239,7 +239,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				PREBINDING = NO;
 				SDKROOT = /Developer/SDKs/MacOSX10.4u.sdk;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Debug;
 		};
@@ -251,7 +251,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				PREBINDING = NO;
 				SDKROOT = /Developer/SDKs/MacOSX10.4u.sdk;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Release;
 		};

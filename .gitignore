@@ -1,0 +1,7 @@
+.svn/
+build/
+**/build/
+*.o
+*.lo
+DerivedData/
+.DS_Store

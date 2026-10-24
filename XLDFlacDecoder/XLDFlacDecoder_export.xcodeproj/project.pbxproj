@@ -214,7 +214,7 @@
 					"-logg",
 				);
 				PREBINDING = NO;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Debug;
 		};
@@ -230,7 +230,7 @@
 					"-logg",
 				);
 				PREBINDING = NO;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Release;
 		};

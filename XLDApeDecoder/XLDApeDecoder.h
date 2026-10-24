@@ -5,8 +5,10 @@ typedef enum {
 	XLDTextTypeCueSheet
 } XLDEmbeddedCueSheetType;
 
-#import "All.h"
-#import "MACLib.h"
+/* Use the Homebrew Monkey's Audio SDK (namespaced APE API) instead of the
+   old vendored headers, matching the installed libMAC. */
+#import <MAC/All.h>
+#import <MAC/MACLib.h>
 #import "XLDDecoder.h"
 
 #define XLD_METADATA_TITLE		@"Title"
@@ -63,7 +65,7 @@ typedef enum {
 
 @interface XLDApeDecoder : NSObject <XLDDecoder>
 {
-	IAPEDecompress *mac;
+	APE::IAPEDecompress *mac;
 	int bps;
 	int samplerate;
 	int channels;

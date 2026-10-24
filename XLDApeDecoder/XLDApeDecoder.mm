@@ -1,14 +1,31 @@
 #import <Foundation/Foundation.h>
 #import "XLDApeDecoder.h"
-#import "APETag.h"
+#import <MAC/IAPETag.h>
 
-extern "C"	{
-	int getApeTag(CAPETag *tag, wchar_t *field, char *buf, int *length);
+using namespace APE;
+
+/* Convert a UTF-8 POSIX path to the SDK's str_utfn (wchar_t = UTF-32 on macOS)
+   for CreateIAPEDecompress; caller frees with delete[]. Done with Foundation so
+   we don't depend on libMAC's C++-only CAPECharacterHelper symbol. */
+static str_utfn *apePathFromUTF8(const char *path)
+{
+	NSString *s = [NSString stringWithUTF8String:path];
+	if(!s) s = @"";
+	NSData *d = [s dataUsingEncoding:NSUTF32LittleEndianStringEncoding];
+	NSUInteger count = [d length]/sizeof(str_utfn);
+	str_utfn *buf = new str_utfn[count+1];
+	if([d length]) memcpy(buf, [d bytes], count*sizeof(str_utfn));
+	buf[count] = 0;
+	return buf;
 }
 
-int getApeTag(CAPETag *tag, wchar_t *field, char *buf, int *length)
+extern "C"	{
+	int getApeTag(APE::IAPETag *tag, wchar_t *field, char *buf, int *length);
+}
+
+int getApeTag(APE::IAPETag *tag, wchar_t *field, char *buf, int *length)
 {
-	return tag->GetFieldBinary(field, buf, length);
+	return tag->GetFieldBinary((const str_utfn *)field, buf, length);
 }
 
 @implementation XLDApeDecoder
@@ -26,7 +43,9 @@ int getApeTag(CAPETag *tag, wchar_t *field, char *buf, int *length)
 	if(memcmp(header,"ID3",3) && memcmp(header,"MAC",3)) return NO;
 	
 	int errnum = -1;
-	IAPEDecompress *mac_tmp = CreateIAPEDecompress(path, &errnum);
+	str_utfn *wpath = apePathFromUTF8(path);
+	IAPEDecompress *mac_tmp = CreateIAPEDecompress(wpath, &errnum, false, true, false);
+	delete[] wpath;
 	if(errnum != 0 || !mac_tmp) return NO;
 	delete(mac_tmp);
 	return YES;
@@ -56,19 +75,21 @@ int getApeTag(CAPETag *tag, wchar_t *field, char *buf, int *length)
 - (BOOL)openFile:(char *)path
 {
 	int errnum = -1;
-	mac = CreateIAPEDecompress(path, &errnum);
+	str_utfn *wpath = apePathFromUTF8(path);
+	mac = CreateIAPEDecompress(wpath, &errnum, false, true, false);
+	delete[] wpath;
 	if(errnum != 0 || !mac) {
 		if(mac) delete mac;
 		mac = NULL;
 		error = YES;
 		return NO;
 	}
-	channels = mac->GetInfo(APE_INFO_CHANNELS,0,0);
-	bps = mac->GetInfo(APE_INFO_BYTES_PER_SAMPLE,0,0);
-	samplerate = mac->GetInfo(APE_INFO_SAMPLE_RATE,0,0);
-	totalFrames = mac->GetInfo(APE_INFO_TOTAL_BLOCKS,0,0);
-	
-	CAPETag *tag = (CAPETag *)mac->GetInfo(APE_INFO_TAG,0,0);
+	channels = mac->GetInfo(IAPEDecompress::APE_INFO_CHANNELS,0,0);
+	bps = mac->GetInfo(IAPEDecompress::APE_INFO_BYTES_PER_SAMPLE,0,0);
+	samplerate = mac->GetInfo(IAPEDecompress::APE_INFO_SAMPLE_RATE,0,0);
+	totalFrames = mac->GetInfo(IAPEDecompress::APE_INFO_TOTAL_BLOCKS,0,0);
+
+	IAPETag *tag = (IAPETag *)mac->GetInfo(IAPEDecompress::APE_INFO_TAG,0,0);
 	int len = 1;
 	char buf_tmp[1];
 	getApeTag(tag, L"cuesheet", buf_tmp, &len);
@@ -598,7 +619,9 @@ int getApeTag(CAPETag *tag, wchar_t *field, char *buf, int *length)
 		internal_buffer = (unsigned char *)realloc(internal_buffer,count*bps*channels);
 		internalBufferBytes = count*bps*channels;
 	}
-	mac->GetData((char *)internal_buffer, count, &ret);
+	int64 ret64 = 0;
+	mac->GetData((unsigned char *)internal_buffer, count, &ret64); /* 64-bit API */
+	ret = (int)ret64;
 	
 #ifdef _BIG_ENDIAN
 	switch(bps) {

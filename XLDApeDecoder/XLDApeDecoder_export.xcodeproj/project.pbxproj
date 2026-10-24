@@ -220,7 +220,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 10.4;
 				OTHER_LDFLAGS = "-lMAC";
 				PREBINDING = NO;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Debug;
 		};
@@ -230,7 +230,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 10.4;
 				OTHER_LDFLAGS = "-lMAC";
 				PREBINDING = NO;
-				VALID_ARCHS = "i386 ppc";
+				VALID_ARCHS = "x86_64";
 			};
 			name = Release;
 		};
