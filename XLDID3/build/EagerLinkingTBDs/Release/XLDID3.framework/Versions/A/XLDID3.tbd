@@ -1,0 +1,1 @@
+{"main_library":{"exported_symbols":[{"text":{"global":["_parseID3"]}}],"flags":[{"attributes":["not_app_extension_safe"]}],"install_names":[{"name":"@executable_path/../Frameworks/XLDID3.framework/Versions/A/XLDID3"}],"target_info":[{"min_deployment":"12","target":"x86_64-macos"}]},"tapi_tbd_version":5}

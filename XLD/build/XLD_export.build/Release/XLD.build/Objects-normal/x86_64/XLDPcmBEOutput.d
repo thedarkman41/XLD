@@ -1,0 +1,9 @@
+dependencies: \
+  /Volumes/Faraday/Users/darkstar/scratch/xld-src/xld/XLD/XLD_Prefix.pch \
+  /Volumes/Faraday/Users/darkstar/scratch/xld-src/xld/XLD/XLDPcmBEOutput.m \
+  /Volumes/Faraday/Users/darkstar/scratch/xld-src/xld/XLD/XLDPcmBEOutput.h \
+  /Volumes/Faraday/Users/darkstar/scratch/xld-src/xld/XLD/XLDDefaultOutput.h \
+  /Volumes/Faraday/Users/darkstar/scratch/xld-src/xld/XLD/XLDOutput.h \
+  /Volumes/Faraday/Users/darkstar/scratch/xld-src/xld/XLD/XLDDefaultOutputTask.h \
+  /Volumes/Faraday/Users/darkstar/scratch/xld-src/xld/XLD/XLDOutputTask.h \
+  /usr/local/include/sndfile.h /usr/local/include/soxr.h

@@ -1,0 +1,2 @@
+Target dependency graph (1 target)
+Target 'XLDShortenDecoder' in project 'XLDShortenDecoder_export' (no dependencies)

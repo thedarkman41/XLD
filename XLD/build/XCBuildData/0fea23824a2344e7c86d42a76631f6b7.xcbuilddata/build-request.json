@@ -1,0 +1,49 @@
+{
+  "buildCommand" : {
+    "command" : "build",
+    "skipDependencies" : false,
+    "style" : "buildAndRun"
+  },
+  "configuredTargets" : [
+    {
+      "guid" : "cd98a64dcb0a69d761af92170fbc210a54ccd73ff59a6499f9d09a4538b4d504"
+    }
+  ],
+  "containerPath" : "/Volumes/Faraday/Users/darkstar/scratch/xld-src/xld/XLD/XLD_export.xcodeproj",
+  "continueBuildingAfterErrors" : false,
+  "dependencyScope" : "workspace",
+  "enableIndexBuildArena" : false,
+  "hideShellScriptEnvironment" : false,
+  "parameters" : {
+    "action" : "build",
+    "configurationName" : "Release",
+    "overrides" : {
+      "commandLine" : {
+        "table" : {
+          "ARCHS" : "x86_64",
+          "CODE_SIGNING_ALLOWED" : "NO",
+          "CODE_SIGNING_REQUIRED" : "NO",
+          "HEADER_SEARCH_PATHS" : "$(inherited) /usr/local/include",
+          "LIBRARY_SEARCH_PATHS" : "$(inherited) /usr/local/lib",
+          "MACOSX_DEPLOYMENT_TARGET" : "12.0",
+          "ONLY_ACTIVE_ARCH" : "YES",
+          "OTHER_LDFLAGS" : "$(inherited) -framework SystemConfiguration",
+          "SDKROOT" : "macosx",
+          "SYMROOT" : "build"
+        }
+      },
+      "synthesized" : {
+        "table" : {
+          "ACTION" : "build",
+          "ENABLE_PREVIEWS" : "NO",
+          "ENABLE_XOJIT_PREVIEWS" : "NO"
+        }
+      }
+    }
+  },
+  "showNonLoggedProgress" : true,
+  "useDryRun" : false,
+  "useImplicitDependencies" : false,
+  "useLegacyBuildLocations" : false,
+  "useParallelTargets" : false
+}
