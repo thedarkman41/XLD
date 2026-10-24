@@ -86,6 +86,9 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 @implementation NSImage (String)
 + (NSImage *)imageWithString:(NSString *)string withFont:(NSFont *)font withColor:(NSColor *)color
 {
+    /* An empty string renders to a zero-width image; locking focus on a
+       zero-size NSImage throws and crashes the app. Bail out instead. */
+    if(!string || [string length] == 0) return nil;
     NSLayoutManager *layoutManager = [[[NSLayoutManager alloc] init] autorelease];
     NSTextContainer *textContainer = [[[NSTextContainer alloc] init] autorelease];
     NSTextStorage *textStorage = [[[NSTextStorage alloc] initWithString:string attributes:[NSDictionary dictionaryWithObjectsAndKeys:font,NSFontAttributeName,nil]] autorelease];
@@ -105,6 +108,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
     [shadow setShadowOffset:NSMakeSize(3,-3)];
     [shadow setShadowBlurRadius:3];
     [shadow setShadowColor:[NSColor lightGrayColor]];
+    if([path currentPoint].x <= 0) { free(glyphs); return nil; } /* nothing to draw */
     NSImage *img = [[NSImage alloc] initWithSize:NSMakeSize([path currentPoint].x,[font pointSize]*2)];
     [img lockFocus];
     [color set];

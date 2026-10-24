@@ -46,13 +46,17 @@
 		[NSGraphicsContext restoreGraphicsState];
 		
 		NSImage *imgStr = [NSImage imageWithString:defaultString?defaultString:@"No Image" withFont:[NSFont boldSystemFontOfSize:30] withColor:[NSColor lightGrayColor]];
-		NSRect origRect = NSMakeRect(0, 0, [imgStr size].width, [imgStr size].height);
-		NSRect newRect;
-		newRect.size.width = viewWidth-10;
-		newRect.size.height = [imgStr size].height*(viewHeight-10)/[imgStr size].width;
-		newRect.origin.x = 5;
-		newRect.origin.y = (viewHeight-newRect.size.height)*0.5;
-		[imgStr drawInRect:newRect fromRect:origRect operation:NSCompositeSourceOver fraction:1.0];
+		/* imgStr is nil for an empty placeholder string (e.g. the empty state);
+		   skip the text then and just draw the box, and guard the width divide. */
+		if(imgStr && [imgStr size].width > 0) {
+			NSRect origRect = NSMakeRect(0, 0, [imgStr size].width, [imgStr size].height);
+			NSRect newRect;
+			newRect.size.width = viewWidth-10;
+			newRect.size.height = [imgStr size].height*(viewHeight-10)/[imgStr size].width;
+			newRect.origin.x = 5;
+			newRect.origin.y = (viewHeight-newRect.size.height)*0.5;
+			[imgStr drawInRect:newRect fromRect:origRect operation:NSCompositeSourceOver fraction:1.0];
+		}
 		[borderColor set];
 		NSFrameRect(rect);
 		[shadow release];
