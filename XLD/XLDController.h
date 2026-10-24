@@ -238,6 +238,9 @@
 /* Main-window toolbar helpers (output-format pulldown + Settings button) */
 - (IBAction)showPreferences:(id)sender;
 - (NSArray *)insertedAudioCDTitles;
+- (NSArray *)insertedOpticalDevices;
+- (void)openOpticalDiscByDevice:(NSString *)dev;
+- (void)openOpticalDiscByDevice:(NSString *)dev withName:(NSString *)name;
 - (NSArray *)outputFormatTitles;
 - (NSString *)currentOutputFormatTitle;
 - (void)selectOutputFormatWithTitle:(NSString *)title;

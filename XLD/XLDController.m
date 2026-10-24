@@ -7,6 +7,10 @@
 #import <sys/stat.h>
 #import <fcntl.h>
 #import <IOKit/scsi/IOSCSIMultimediaCommandsDevice.h>
+#import <IOKit/IOKitLib.h>
+#import <IOKit/IOBSD.h>
+#import <IOKit/storage/IOMedia.h>
+#import <IOKit/storage/IOCDMedia.h>
 #import <DiskArbitration/DiskArbitration.h>
 #import "XLDController.h"
 #import "XLDecoderCenter.h"
@@ -60,7 +64,12 @@ static void diskAppeared(DADiskRef disk, void *context)
 {
 	//NSLog(@"appear");
 	//NSLog(@"%s",DADiskGetBSDName(disk));
-	[(id)context performSelector:@selector(updateCDDAListAndMount:) withObject:[NSString stringWithUTF8String:(const char*)DADiskGetBSDName(disk)] afterDelay:1.0];
+	NSString *bsd = [NSString stringWithUTF8String:(const char*)DADiskGetBSDName(disk)];
+	/* Refresh the Open menu, and open the disc in the source list by DEVICE so it
+	   shows even when it is not (or no longer) mounted as a cddafs volume — e.g.
+	   after a prior rip unmounted it. Deduped by device in openOpticalDiscByDevice:. */
+	[(id)context performSelector:@selector(updateCDDAListAndMount:) withObject:bsd afterDelay:1.0];
+	[(id)context performSelector:@selector(openOpticalDiscByDevice:) withObject:[@"/dev/" stringByAppendingString:bsd] afterDelay:1.2];
 }
 
 static void diskDisappeared(DADiskRef disk, void *context)
@@ -1631,9 +1640,51 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	struct statfs statDisc;
 	statfs([[@"/Volumes" stringByAppendingPathComponent:tmpStr] UTF8String], &statDisc);
 	NSString *dev = [NSString stringWithUTF8String:statDisc.f_mntfromname];
-	[discView addScanningDiscWithVolume:volume device:dev];
-	NSArray *args = [NSArray arrayWithObjects:volume, [NSNumber numberWithBool:[o_dontReadSubchannel state] == NSOffState], nil];
+	[self openOpticalDiscByDevice:dev withName:volume];
+}
+
+/* Open an optical disc in the source list by its device node (e.g. /dev/disk6),
+   independent of whether it is mounted as a cddafs volume. Deduped by device, so
+   it is safe to call from both the launch scan and the disk-appeared callback. */
+- (void)openOpticalDiscByDevice:(NSString *)dev
+{
+	[self openOpticalDiscByDevice:dev withName:nil];
+}
+
+- (void)openOpticalDiscByDevice:(NSString *)dev withName:(NSString *)name
+{
+	if(!dev || ![dev hasPrefix:@"/dev/"]) return;
+	if([discView entryForDevice:dev]) return;           /* already shown/scanning */
+	if([XLDCDDARippingSession isDeviceBusy:dev]) return; /* mid-rip on this drive */
+	if(![name length]) name = LS(@"Audio CD");
+	[discView addScanningDiscWithVolume:name device:dev];
+	NSArray *args = [NSArray arrayWithObjects:name, [NSNumber numberWithBool:[o_dontReadSubchannel state] == NSOffState], dev, nil];
 	[NSThread detachNewThreadSelector:@selector(readPreGapOfDisc:) toTarget:self withObject:args];
+}
+
+/* Device nodes (/dev/diskN) of every whole CD currently in a drive, found via
+   IOKit so they are seen regardless of mount state. */
+- (NSArray *)insertedOpticalDevices
+{
+	NSMutableArray *devs = [NSMutableArray array];
+	CFMutableDictionaryRef match = IOServiceMatching(kIOCDMediaClass);
+	if(!match) return devs;
+	CFDictionarySetValue(match, CFSTR(kIOMediaWholeKey), kCFBooleanTrue);
+	io_iterator_t iter = IO_OBJECT_NULL;
+	if(IOServiceGetMatchingServices(kIOMasterPortDefault, match, &iter) == KERN_SUCCESS) {
+		io_object_t media;
+		while((media = IOIteratorNext(iter))) {
+			CFStringRef bsd = IORegistryEntryCreateCFProperty(media, CFSTR(kIOBSDNameKey), kCFAllocatorDefault, 0);
+			if(bsd) {
+				if(CFGetTypeID(bsd) == CFStringGetTypeID())
+					[devs addObject:[@"/dev/" stringByAppendingString:(NSString *)bsd]];
+				CFRelease(bsd);
+			}
+			IOObjectRelease(media);
+		}
+		IOObjectRelease(iter);
+	}
+	return devs;
 }
 
 - (void)postScanProgress:(NSArray *)args
@@ -1682,11 +1733,10 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 - (void)updateCDDAListAndMount:(NSString *)device
 {
 	//NSLog(@"updateCDDAListAndMount called with %@",device);
-	BOOL automount = NO;
-	NSMenuItem *discToMount = nil;
-	/* Gate automount on THIS drive only, not app-wide, so a disc inserted into
-	   a free drive still auto-opens while another drive is ripping. (#631) */
-	if(device && ![XLDCDDARippingSession isDeviceBusy:[@"/dev/" stringByAppendingString:device]] && !openingFiles && ([o_autoMountDisc state] == NSOnState)) automount = YES;
+	/* This only refreshes the Open / Eject menus from mounted cddafs volumes now;
+	   auto-opening a disc into the source list is done by device in
+	   openOpticalDiscByDevice: (called from the disk-appeared callback and the
+	   launch scan), which works whether or not the disc is cddafs-mounted. */
 	if(device) [self makeDriveOffsetList];
 	
 	int i,n=0;
@@ -1713,15 +1763,6 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			[o_openCDDA insertItem:item atIndex:n];
 			[o_ejectDiscMenu insertItem:item2 atIndex:n];
 			n++;
-			if(automount) {
-				const char *devicePath = [[NSString stringWithFormat:@"/dev/%@",device] UTF8String];
-				if(!strcmp(devicePath, statDisc.f_mntfromname)) {
-					struct stat st;
-					stat([mntPath UTF8String], &st);
-					//NSLog(@"%f",st.st_mtimespec.tv_sec - launchDate);
-					if((st.st_mtimespec.tv_sec - launchDate) > -30) discToMount = item;
-				}
-			}
 			[item release];
 		}
 	}
@@ -1735,7 +1776,6 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		[item release];
 		[item2 release];
 	}
-	if(discToMount) [self readCDDA:discToMount];
 }
 
 - (IBAction)updateCDDAList:(id)sender
@@ -3713,18 +3753,23 @@ end:
 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 	NSString *volume = [args objectAtIndex:0];
 	BOOL shouldReadSubchannel = [[args objectAtIndex:1] boolValue];
-	NSMutableString *tmpStr = [NSMutableString stringWithString:volume];
-	[tmpStr replaceOccurrencesOfString:@"/" withString:@":" options:0 range:NSMakeRange(0, [tmpStr length])];
-	//NSLog(@"%s",[[@"/Volumes" stringByAppendingPathComponent:tmpStr] UTF8String]);
-	struct statfs statDisc;
-	statfs([[@"/Volumes" stringByAppendingPathComponent:tmpStr] UTF8String], &statDisc);
-	//NSLog(@"%s",stat.f_mntfromname);
-	
-	[opticalDriveManager unmountDisc:[NSString stringWithUTF8String:statDisc.f_mntfromname]];
-	NSString *scanDev = [NSString stringWithUTF8String:statDisc.f_mntfromname]; /* for per-disc scan progress */
+	/* Device is passed explicitly (openOpticalDiscByDevice:) so an unmounted disc
+	   can still be read; fall back to resolving it from the cddafs mount path for
+	   any legacy caller that only knows the volume name. */
+	NSString *dev = ([args count] > 2 && [[args objectAtIndex:2] length]) ? [args objectAtIndex:2] : nil;
+	if(!dev) {
+		NSMutableString *tmpStr = [NSMutableString stringWithString:volume];
+		[tmpStr replaceOccurrencesOfString:@"/" withString:@":" options:0 range:NSMakeRange(0, [tmpStr length])];
+		struct statfs statDisc;
+		statfs([[@"/Volumes" stringByAppendingPathComponent:tmpStr] UTF8String], &statDisc);
+		dev = [NSString stringWithUTF8String:statDisc.f_mntfromname];
+	}
+
+	[opticalDriveManager unmountDisc:dev];
+	NSString *scanDev = dev; /* for per-disc scan progress */
 
 	int i;
-	XLDCDDARippingSession *rippingSession = [XLDCDDARippingSession createSessionForDevice:[NSString stringWithUTF8String:statDisc.f_mntfromname]];
+	XLDCDDARippingSession *rippingSession = [XLDCDDARippingSession createSessionForDevice:dev];
 	if([rippingSession open] != -1) {
 		xld_cdread_t *cdread = [rippingSession descriptor];
 		/* driveIsBusy is per-drive now via the sessions dictionary; leave the
@@ -3795,7 +3840,7 @@ end:
 			[ripper release];
 			[rippingSession destroy];
 			driveIsBusy = NO;
-			[opticalDriveManager mountDisc:[NSString stringWithUTF8String:statDisc.f_mntfromname]];
+			[opticalDriveManager mountDisc:dev];
 			[discView performSelectorOnMainThread:@selector(removeScanningDiscForDevice:) withObject:scanDev waitUntilDone:YES];
 			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
 			[self performSelectorOnMainThread:@selector(delayedRefleshList) withObject:nil waitUntilDone:NO];
@@ -3811,6 +3856,10 @@ end:
 		
 	}
 	else {
+		/* Open failed: destroy the session so the drive is not left marked busy
+		   forever (+isDeviceBusy: keys on it), which would make every later open
+		   attempt for this device return early and silently. */
+		[rippingSession destroy];
 		[discView performSelectorOnMainThread:@selector(removeScanningDiscForDevice:) withObject:scanDev waitUntilDone:YES];
 		[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
@@ -4387,13 +4436,13 @@ end:
 
 - (void)scanOpticalDrivesOnLaunch
 {
-	/* On launch, scan every optical drive for an inserted audio CD and open
-	   each one, so each disc shows in the left column (with a disc icon) and
-	   gets an automatic title + artwork lookup via openParsedDisc:. With more
-	   than one drive, every drive's disc is opened. If no disc is present, show
-	   the empty-state window instead. */
-	NSArray *cds = [self insertedAudioCDTitles];
-	if(![cds count]) {
+	/* On launch, show every disc currently in a drive in the left column, found
+	   by DEVICE (IOKit) so a disc appears whether or not it is mounted as a cddafs
+	   volume — in particular after a prior rip unmounted it. Each disc gets a scan
+	   + automatic title/artwork lookup via openParsedDisc:. With no disc present,
+	   show the empty-state window. */
+	NSArray *devs = [self insertedOpticalDevices];
+	if(![devs count]) {
 		if(![discView cueParser]) {
 			[discView reloadData];
 			[[discView window] makeKeyAndOrderFront:nil];
@@ -4401,10 +4450,8 @@ end:
 		return;
 	}
 	int i;
-	for(i=0;i<[cds count];i++) {
-		NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:[cds objectAtIndex:i] action:nil keyEquivalent:@""];
-		[self readCDDA:item];
-		[item release];
+	for(i=0;i<[devs count];i++) {
+		[self openOpticalDiscByDevice:[devs objectAtIndex:i] withName:nil];
 	}
 }
 
