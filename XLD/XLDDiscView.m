@@ -55,7 +55,13 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		//[[o_totalTime cell] setBackgroundStyle:2]; // NSBackgroundStyleRaised
 	}
 	if([o_selectorTable respondsToSelector:@selector(setSelectionHighlightStyle:)]) {
-		[o_selectorTable setSelectionHighlightStyle:1];
+		/* None (-1): the system draws the row selection with the OS accent and
+		   bypasses our drawing either way, so turn it off entirely — XLDSourceTableView
+		   -drawRow: paints the selection pill itself in the theme accent. */
+		[o_selectorTable setSelectionHighlightStyle:-1];
+		/* SourceList also supplied the sidebar's background; without it the table
+		   falls back to a (light) default, so match the track list's background. */
+		[o_selectorTable setBackgroundColor:[o_trackTable backgroundColor]];
 	}
 	/* Shrink the selection pill on the right so it never sits under the eject glyph. */
 	if([o_selectorTable isMemberOfClass:[NSTableView class]])
@@ -668,6 +674,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 {
 	[o_queueButton setEnabled:enabled];
 }
+
 
 /* Theme changed: re-tint every disc's track checkboxes and redraw the tables so
    the accent pill picks up the new color. */

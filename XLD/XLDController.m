@@ -4999,6 +4999,12 @@ end:
 	XLDSetThemeAccentIndex((int)[sender tag]);
 }
 
+/* Theme: the Preferences accent-color pull-down (selected item's tag = index). */
+- (IBAction)themeColorChanged:(id)sender
+{
+	XLDSetThemeAccentIndex((int)[[sender selectedItem] tag]);
+}
+
 /* Tint the accent-following controls the theme owns outside the custom tables. */
 - (void)applyAccentToControls
 {
@@ -5011,6 +5017,7 @@ end:
 {
 	[self applyAccentToControls];
 	if([discView respondsToSelector:@selector(applyAccentColor)]) [discView applyAccentColor];
+	[o_themePopUp selectItemWithTag:XLDThemeAccentIndex()];
 }
 
 - (BOOL)canSetCompilationFlag
@@ -5811,6 +5818,32 @@ fail:
 	}
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(accentColorChanged:) name:XLDAccentColorChangedNotification object:nil];
 	[self applyAccentToControls];
+	/* Theme-color pull-down in Preferences > General (bottom-right, beside the
+	   "Automatically check for updates" row): 7 accent swatches that recolor the UI. */
+	{
+		NSView *gv = [o_outputSelectRadio superview];
+		if(gv) {
+			NSTextField *lbl = [[[NSTextField alloc] initWithFrame:NSMakeRect(250, 19, 54, 16)] autorelease];
+			[lbl setEditable:NO]; [lbl setBordered:NO]; [lbl setDrawsBackground:NO]; [lbl setSelectable:NO];
+			[lbl setStringValue:LS(@"Theme :")];
+			[lbl setFont:[NSFont systemFontOfSize:12]];
+			[gv addSubview:lbl];
+			o_themePopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(304, 14, 178, 26) pullsDown:NO];
+			int ti;
+			for(ti=0; ti<XLD_ACCENT_COUNT; ti++) {
+				NSMenuItem *it = [[[NSMenuItem alloc] initWithTitle:LS(XLDThemeAccentNameAtIndex(ti)) action:NULL keyEquivalent:@""] autorelease];
+				[it setTag:ti];
+				NSImage *sw = [[[NSImage alloc] initWithSize:NSMakeSize(14,14)] autorelease];
+				[sw lockFocus]; [XLDThemeAccentColorAtIndex(ti) setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(1,1,12,12)] fill]; [sw unlockFocus];
+				[it setImage:sw];
+				[[o_themePopUp menu] addItem:it];
+			}
+			[o_themePopUp selectItemWithTag:XLDThemeAccentIndex()];
+			[o_themePopUp setTarget:self];
+			[o_themePopUp setAction:@selector(themeColorChanged:)];
+			[gv addSubview:o_themePopUp];
+		}
+	}
 	{
 		NSString *customMusicAppName = [defs stringForKey:@"XLDCustomMusicAppName"];
 		if(floor(NSAppKitVersionNumber) < 1862) {

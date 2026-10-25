@@ -1049,6 +1049,14 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		[glow release];
 		[NSGraphicsContext restoreGraphicsState];
 	}
+	else if([[self selectedRowIndexes] containsIndex:row]) {
+		/* Selection pill in the theme accent (the system highlight is off). Drawn
+		   before the cells so the row text sits on top of it. */
+		NSRect r = NSInsetRect([self rectOfRow:row], 2.0, 2.0);
+		CGFloat radius = r.size.height/2.0;
+		[XLDThemeAccentColor() setFill];
+		[[NSBezierPath bezierPathWithRoundedRect:r xRadius:radius yRadius:radius] fill];
+	}
 	[super drawRow:row clipRect:clipRect];
 }
 @end

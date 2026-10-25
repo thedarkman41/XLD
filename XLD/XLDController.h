@@ -162,6 +162,7 @@
 	id opticalDriveManager;
 	BOOL ejected;
 	id overrideCueParser; /* when set, the next beginDecode: targets this disc, not the selected one (unmount handoff for parallel rips) */
+	NSPopUpButton *o_themePopUp; /* theme-color selector in Preferences > General */
 	NSString *musicAppName;
 	NSTimeInterval lastClickTime;
 	BOOL forceFullMBTag;
