@@ -208,10 +208,27 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	/* Centre the Track column so the dashes line up (and nudge the content 2px
 	   left via the cell's line-break/inset is not exposed, so centring is the
 	   clean lever); the disc-prefix is only shown for multi-disc sets. */
+	/* Every column user-resizable, with the whole layout (widths/order) remembered
+	   across launches. The Track column is user-resizable but NOT auto-resizing, so
+	   its default stays wide enough to show the full "Track" header instead of
+	   being squeezed when the window grows to full width; the wide columns (Title,
+	   Artist) keep auto-resizing to fill. Defaults are set first, then autosave is
+	   enabled so a previously saved layout wins on later launches but first run
+	   keeps these. */
 	{
 		NSTableColumn *tc = [o_trackTable tableColumnWithIdentifier:@"Track"];
 		[[tc dataCell] setAlignment:NSCenterTextAlignment];
 		[[tc headerCell] setAlignment:NSCenterTextAlignment];
+		[tc setResizingMask:NSTableColumnUserResizingMask];
+		[tc setMaxWidth:300.0]; /* nib caps it narrow; lift before widening */
+		[tc setMinWidth:48.0];
+		[tc setWidth:62.0];
+		NSEnumerator *ce = [[o_trackTable tableColumns] objectEnumerator];
+		NSTableColumn *col;
+		while((col = [ce nextObject]))
+			if(col != tc) [col setResizingMask:NSTableColumnUserResizingMask|NSTableColumnAutoresizingMask];
+		[o_trackTable setAutosaveName:@"XLDTrackTable"];
+		[o_trackTable setAutosaveTableColumns:YES];
 	}
 
 	[o_imageView setAcceptClick:YES];
@@ -303,6 +320,25 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[o_window display];
 	//[o_window makeKeyAndOrderFront:self];
 	proposedRow = -1;
+	/* First launch (no saved split): give the source list a roomier default once
+	   the window has reached its real size, so a proportional resize can't shrink
+	   it back. A saved position is restored by loadPrefs and left alone. */
+	/* First launch (no saved split): give the source list a roomier default once
+	   the window is at a real size. windowDidResize: also applies this (whichever
+	   fires first persists the pref; the other then skips), covering the case where
+	   no launch resize notification arrives. */
+	if(![[NSUserDefaults standardUserDefaults] objectForKey:@"XLDDiscViewSplitPosition"]) {
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+			if([[NSUserDefaults standardUserDefaults] objectForKey:@"XLDDiscViewSplitPosition"]) return;
+			CGFloat total = [o_splitView frame].size.width;
+			CGFloat left = 250.0;
+			if(total > left + 200.0) {
+				NSString *pos = [NSString stringWithFormat:@"%d %d", (int)left, (int)(total - left - [o_splitView dividerThickness])];
+				[self setSplitViewPosition:o_splitView position:pos];
+				[[NSUserDefaults standardUserDefaults] setObject:pos forKey:@"XLDDiscViewSplitPosition"];
+			}
+		});
+	}
 	return self;
 }
 
@@ -710,6 +746,8 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if(obj=[pref objectForKey:@"XLDDiscViewSplitPosition"]) {
 		[self setSplitViewPosition:o_splitView position:obj];
 	}
+	/* First-launch default is applied in initWithDelegate: once the window is at
+	   its real size (a proportional resize here would otherwise shrink it). */
 }
 
 - (BOOL)burning
@@ -1082,6 +1120,18 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[self setSplitViewPosition: o_splitView position: splitPosition];
 	[splitPosition release];
 	splitPosition = nil;
+	/* First launch (no saved split): once the window is at a real size, give the
+	   source list a roomier default so full disc titles fit, and persist it so this
+	   runs only once. Later the user's own width is restored and left alone. */
+	if(![[NSUserDefaults standardUserDefaults] objectForKey:@"XLDDiscViewSplitPosition"]) {
+		CGFloat total = [o_splitView frame].size.width;
+		CGFloat left = 250.0;
+		if(total > left + 200.0) {
+			NSString *pos = [NSString stringWithFormat:@"%d %d", (int)left, (int)(total - left - [o_splitView dividerThickness])];
+			[self setSplitViewPosition:o_splitView position:pos];
+			[[NSUserDefaults standardUserDefaults] setObject:pos forKey:@"XLDDiscViewSplitPosition"];
+		}
+	}
 	/* Clear any stale pixels left by live resize when layer-backed in dark mode. */
 	if(XLDDarkModeSupportEnabled) [[o_window contentView] setNeedsDisplay:YES];
 }
