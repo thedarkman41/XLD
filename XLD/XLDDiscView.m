@@ -1128,11 +1128,16 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		else {
 			if(rowIndex >= [[cueParser trackList] count]) return nil;
 			if([identifier isEqualToString:@"Track"]) {
-				NSNumber *track = [[[[cueParser trackList] objectAtIndex:rowIndex] metadata] objectForKey:XLD_METADATA_TRACK];
-				NSNumber *disc = [[[[cueParser trackList] objectAtIndex:rowIndex] metadata] objectForKey:XLD_METADATA_DISC];
-				if(disc && track) return [NSString stringWithFormat:@"%d-%02d",[disc intValue],[track intValue]];
-				if(track) return track;
-				else return [NSNumber numberWithInt: rowIndex+1];
+				id meta = [[[cueParser trackList] objectAtIndex:rowIndex] metadata];
+				NSNumber *track = [meta objectForKey:XLD_METADATA_TRACK];
+				NSNumber *disc = [meta objectForKey:XLD_METADATA_DISC];
+				NSNumber *totalDiscs = [meta objectForKey:XLD_METADATA_TOTALDISCS];
+				/* Only prefix the disc number for a multi-disc set; a lone disc shows
+				   just the zero-padded track number. */
+				BOOL multiDisc = (totalDiscs && [totalDiscs intValue] > 1) || (disc && [disc intValue] > 1);
+				int tn = track ? [track intValue] : (rowIndex+1);
+				if(multiDisc && disc) return [NSString stringWithFormat:@"%d-%02d",[disc intValue],tn];
+				return [NSString stringWithFormat:@"%02d",tn];
 			}
 			else if([identifier isEqualToString:@"Title"]) {
 				NSString *title = [[[[cueParser trackList] objectAtIndex:rowIndex] metadata] objectForKey:XLD_METADATA_TITLE];
