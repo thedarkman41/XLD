@@ -4512,6 +4512,18 @@ end:
 	return [o_maxThreads intValue];
 }
 
+- (BOOL)isDeviceRipping:(NSString *)dev
+{
+	return [taskQueue isDeviceBusy:dev];
+}
+
+- (void)queueBusyDevicesChanged
+{
+	/* A drive started ripping: make the disc view sweep its busy rows. */
+	if([discView respondsToSelector:@selector(startCylonAnimation)])
+		[discView startCylonAnimation];
+}
+
 - (BOOL)canSetCompilationFlag
 {
 	return ([o_autoSetCompilation state] == NSOnState);

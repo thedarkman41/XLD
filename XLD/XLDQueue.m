@@ -84,10 +84,20 @@ extern int XLDDarkModeSupportEnabled;
 - (void)startTask:(id)task
 {
 	NSString *key = [task atomicKey];
-	if(key) [busyDevices addObject:key];
+	if(key) {
+		[busyDevices addObject:key];
+		/* Let the disc view start its busy-drive Cylon sweep. */
+		if([delegate respondsToSelector:@selector(queueBusyDevicesChanged)])
+			[delegate queueBusyDevicesChanged];
+	}
 	[task beginConvert];
 	if(lowestActivePosition < [task position]) lowestActivePosition = [task position];
 	threadsOccupied += [task threadsOccupied];
+}
+
+- (BOOL)isDeviceBusy:(NSString *)dev
+{
+	return (dev && [busyDevices containsObject:dev]);
 }
 
 - (IBAction)test:(id)sender

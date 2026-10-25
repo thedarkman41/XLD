@@ -36,5 +36,6 @@
 - (IBAction)cancelAllTasks:(id)sender;
 - (void)setMenuForItem:(id)item;
 - (BOOL)hasActiveTask;
+- (BOOL)isDeviceBusy:(NSString *)dev;
 
 @end

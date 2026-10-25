@@ -874,6 +874,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 
 @interface NSObject (XLDScanProgressSource)
 - (double)scanProgressForRow:(NSInteger)row;
+- (double)cylonSeedForRow:(NSInteger)row;
 @end
 
 /* The eject glyph button is laid out at x = bounds.width - 22 (see
@@ -940,7 +941,13 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		[NSGraphicsContext saveGraphicsState];
 		[pill addClip];
 		double t = [NSDate timeIntervalSinceReferenceDate];
-		double pos = 0.5 * (1.0 - cos(t * 4.5)); /* smooth 0..1..0 ping-pong */
+		/* Each drive sweeps on a slightly different period and phase (from a stable
+		   per-drive seed) so multiple busy drives are never synchronised. */
+		double seed = 0.0;
+		if([del respondsToSelector:@selector(cylonSeedForRow:)]) seed = [del cylonSeedForRow:row];
+		double freq = 4.1 + seed * 1.6;        /* ~4.1..5.7 rad/s */
+		double phase = seed * 6.2831853;
+		double pos = 0.5 * (1.0 - cos(t * freq + phase)); /* smooth 0..1..0 ping-pong */
 		CGFloat margin = r.size.height * 0.6;
 		CGFloat eyeX = r.origin.x + margin + (CGFloat)pos * (r.size.width - 2.0*margin);
 		CGFloat eyeY = NSMidY(r);

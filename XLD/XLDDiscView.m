@@ -462,29 +462,50 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if([parserArray count] == 1)
 		[o_selectorTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
 	[o_window makeKeyAndOrderFront:nil]; /* show the disc immediately, while it scans */
-	/* Drive the Cylon sweep on the scanning rows. Common modes so it keeps
-	   animating while a menu is open or the window is being resized. */
-	if(!scanAnimTimer) {
-		scanAnimTimer = [[NSTimer timerWithTimeInterval:1.0/30.0 target:self selector:@selector(scanAnimTick:) userInfo:nil repeats:YES] retain];
-		[[NSRunLoop currentRunLoop] addTimer:scanAnimTimer forMode:NSRunLoopCommonModes];
+	[self startCylonAnimation];
+}
+
+/* Drive the Cylon sweep on scanning rows AND on rows whose drive is busy ripping.
+   Common modes so it keeps animating while a menu is open or the window resizes. */
+- (void)startCylonAnimation
+{
+	if(![NSThread isMainThread]) {
+		dispatch_async(dispatch_get_main_queue(), ^{ [self startCylonAnimation]; });
+		return;
 	}
+	if(scanAnimTimer) return;
+	scanAnimTimer = [[NSTimer timerWithTimeInterval:1.0/30.0 target:self selector:@selector(scanAnimTick:) userInfo:nil repeats:YES] retain];
+	[[NSRunLoop currentRunLoop] addTimer:scanAnimTimer forMode:NSRunLoopCommonModes];
 }
 
 - (void)scanAnimTick:(NSTimer *)timer
 {
-	BOOL anyScanning = NO;
+	BOOL anyActive = NO;
 	int i;
 	for(i=0;i<[parserArray count];i++) {
-		if([[parserArray objectAtIndex:i] isKindOfClass:[XLDScanningDisc class]]) {
-			anyScanning = YES;
-			[o_selectorTable setNeedsDisplayInRect:[o_selectorTable rectOfRow:i]];
-		}
+		if([self scanProgressForRow:i] >= 0.0) { anyActive = YES; break; }
 	}
-	if(!anyScanning) {
+	/* Redraw the whole (small) source list: this both advances active sweeps and
+	   clears a row the instant its drive stops being busy. */
+	[o_selectorTable setNeedsDisplay:YES];
+	if(!anyActive) {
 		[scanAnimTimer invalidate];
 		[scanAnimTimer release];
 		scanAnimTimer = nil;
 	}
+}
+
+/* The /dev/disk device backing a row, whether it is still scanning or opened. */
+- (NSString *)deviceForRow:(NSInteger)row
+{
+	if(row < 0 || row >= [parserArray count]) return nil;
+	id p = [parserArray objectAtIndex:row];
+	if([p isKindOfClass:[XLDScanningDisc class]]) return [p devicePath];
+	if([p respondsToSelector:@selector(fileToDecode)]) {
+		NSString *f = [p fileToDecode];
+		if([f hasPrefix:@"/dev/disk"]) return f;
+	}
+	return nil;
 }
 
 - (void)updateScanProgress:(double)frac forDevice:(NSString *)dev
@@ -505,7 +526,23 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if(row < 0 || row >= [parserArray count]) return -1.0;
 	id p = [parserArray objectAtIndex:row];
 	if([p isKindOfClass:[XLDScanningDisc class]]) return [p scanProgress];
+	/* An opened disc whose drive is busy ripping also gets the sweep. */
+	if([delegate respondsToSelector:@selector(isDeviceRipping:)]) {
+		NSString *dev = [self deviceForRow:row];
+		if(dev && [delegate isDeviceRipping:dev]) return 0.0;
+	}
 	return -1.0;
+}
+
+/* A stable per-drive seed in [0,1) so each drive's Cylon sweeps on a slightly
+   different period/phase and they never march in lockstep. */
+- (double)cylonSeedForRow:(NSInteger)row
+{
+	NSString *dev = [self deviceForRow:row];
+	if(!dev) return (double)((row * 2654435761u) % 997) / 997.0;
+	unsigned long h = 5381; NSUInteger i, n = [dev length];
+	for(i=0;i<n;i++) h = ((h << 5) + h) + (unsigned char)[dev characterAtIndex:i];
+	return (double)(h % 1000) / 1000.0;
 }
 
 - (void)removeScanningDiscForDevice:(NSString *)dev

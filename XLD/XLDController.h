@@ -214,6 +214,8 @@
 - (unsigned int)cddbQueryFlag;
 - (NSStringEncoding)encoding;
 - (int)maxThreads;
+- (BOOL)isDeviceRipping:(NSString *)dev;
+- (void)queueBusyDevicesChanged;
 - (void)discRippedWithResult:(id)result;
 - (void)accurateRipCheckDidFinish:(id)result;
 - (void)updateCDDAListAndMount:(NSString *)device;

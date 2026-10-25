@@ -57,6 +57,7 @@
 - (id)initWithDelegate:(id)del;
 - (void)openCueParser:(id)parser;
 - (void)reloadData;
+- (void)startCylonAnimation;
 - (void)imageLoaded;
 - (NSWindow *)window;
 - (id)cueParser;
