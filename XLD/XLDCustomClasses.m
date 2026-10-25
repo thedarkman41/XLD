@@ -963,6 +963,41 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 }
 @end
 
+@interface NSObject (XLDRipStateSource)
+- (int)ripStateForRow:(NSInteger)row;
+@end
+
+@implementation XLDTrackTableView
+/* The track currently being ripped shows a soft cyan Cylon sweep across its row,
+   drawn under the cell contents so the text stays readable. Completed rows are
+   greyed by the data source (attributed strings) and need no drawing here. */
+- (void)drawRow:(NSInteger)row clipRect:(NSRect)clipRect
+{
+	int st = 0;
+	id src = [self delegate];
+	if(![src respondsToSelector:@selector(ripStateForRow:)]) src = [self dataSource];
+	if([src respondsToSelector:@selector(ripStateForRow:)]) st = (int)[src ripStateForRow:row];
+	if(st == 2) {
+		NSRect r = [self rectOfRow:row];
+		[NSGraphicsContext saveGraphicsState];
+		[[NSBezierPath bezierPathWithRect:r] addClip];
+		double t = [NSDate timeIntervalSinceReferenceDate];
+		double pos = 0.5 * (1.0 - cos(t * 4.5)); /* smooth 0..1..0 ping-pong */
+		CGFloat margin = r.size.height * 2.0;
+		CGFloat eyeX = r.origin.x + margin + (CGFloat)pos * (r.size.width - 2.0*margin);
+		CGFloat eyeY = NSMidY(r);
+		CGFloat eyeR = r.size.height * 3.0;
+		NSColor *bright = [NSColor colorWithCalibratedRed:0.30 green:0.75 blue:1.0 alpha:0.55];
+		NSColor *faint  = [NSColor colorWithCalibratedRed:0.20 green:0.55 blue:0.80 alpha:0.0];
+		NSGradient *glow = [[NSGradient alloc] initWithStartingColor:bright endingColor:faint];
+		[glow drawFromCenter:NSMakePoint(eyeX,eyeY) radius:0.0 toCenter:NSMakePoint(eyeX,eyeY) radius:eyeR options:0];
+		[glow release];
+		[NSGraphicsContext restoreGraphicsState];
+	}
+	[super drawRow:row clipRect:clipRect];
+}
+@end
+
 @implementation XLDScanningDisc
 - (id)initWithVolume:(NSString *)volume device:(NSString *)device
 {

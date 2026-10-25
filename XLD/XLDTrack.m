@@ -59,6 +59,16 @@
 	enabled = flag;
 }
 
+- (int)ripState
+{
+	return ripState;
+}
+
+- (void)setRipState:(int)s
+{
+	ripState = s;
+}
+
 - (NSString *)desiredFileName
 {
 	return desiredFileName;

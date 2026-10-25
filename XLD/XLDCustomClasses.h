@@ -175,6 +175,11 @@
 @interface XLDSourceTableView : NSTableView
 @end
 
+/* Track list with inline per-track rip progress: a Cylon sweep across the row
+   currently being ripped (rip state via the delegate's ripStateForRow:). */
+@interface XLDTrackTableView : NSTableView
+@end
+
 /* Lightweight stand-in shown in the source list while a disc's pregap/TOC is
    still being scanned, so the disc (name + icon) appears immediately and its
    row can show scan progress. Responds safely to the accessors the disc view

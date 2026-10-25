@@ -104,10 +104,12 @@
 - (void)setOutputDir:(NSString *)path;
 - (void)setTagWritable:(BOOL)flag;
 - (void)setTrack:(XLDTrack *)t;
+- (XLDTrack *)track;
 - (void)setScaleType:(XLDScaleType)type;
 - (void)setCompressionQuality:(float)quality;
 - (void)setScaleSize:(int)pixel;
 - (BOOL)isActive;
+- (BOOL)wasCancelled;
 - (void)setiTunesLib:(NSString *)lib withAppName:(NSString *)appName;
 - (BOOL)isAtomic;
 - (NSString *)atomicKey;

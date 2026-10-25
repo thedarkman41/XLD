@@ -1195,9 +1195,12 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		if(albumFolder) [spotOnFolderByDevice setObject:albumFolder forKey:[cueParser fileToDecode]];
 	}
 
+	/* Clear any previous inline rip state so a re-rip starts fresh. */
+	for(i=0;i<[trackList count];i++) [[trackList objectAtIndex:i] setRipState:0];
+
 	for(i=0;i<[trackList count];i++) {
 		XLDTrack *trk = [trackList objectAtIndex:i];
-		if(![trk enabled]) continue; 
+		if(![trk enabled]) continue;
 		
 		XLDConverterTask *task = [[XLDConverterTask alloc] initWithQueue:taskQueue];
 		

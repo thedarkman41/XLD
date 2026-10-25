@@ -10,6 +10,7 @@
 	BOOL enabled;
 	NSString *desiredFileName;
 	NSMutableDictionary *metadataDic;
+	int ripState; /* 0 idle, 2 active (ripping), 3 done — for inline progress */
 }
 
 - (xldoffset_t)index;
@@ -26,5 +27,7 @@
 - (void)setSeconds:(int)sec;
 - (id)metadata;
 - (void)setMetadata:(NSMutableDictionary *)data;
+- (int)ripState;
+- (void)setRipState:(int)s;
 
 @end

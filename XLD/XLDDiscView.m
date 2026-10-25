@@ -60,7 +60,10 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	/* Shrink the selection pill on the right so it never sits under the eject glyph. */
 	if([o_selectorTable isMemberOfClass:[NSTableView class]])
 		object_setClass(o_selectorTable, [XLDSourceTableView class]);
-	
+	/* Inline per-track rip progress (Cylon sweep over the active track row). */
+	if([o_trackTable isMemberOfClass:[NSTableView class]])
+		object_setClass(o_trackTable, [XLDTrackTableView class]);
+
 	delegate = [del retain];
 	[o_verify setHidden:YES]; /* Verify button removed */
 	toolbarItems = [[NSMutableDictionary alloc] init];
@@ -488,11 +491,40 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	/* Redraw the whole (small) source list: this both advances active sweeps and
 	   clears a row the instant its drive stops being busy. */
 	[o_selectorTable setNeedsDisplay:YES];
-	if(!anyActive) {
+
+	/* Inline per-track progress: sweep the track being ripped and keep finished
+	   rows' checkboxes greyed. */
+	BOOL anyTrackActive = NO;
+	id parser = [self cueParser];
+	if(parser) {
+		NSArray *tl = [parser trackList];
+		int n = (int)[tl count];
+		for(i=0;i<n;i++) {
+			int st = [[tl objectAtIndex:i] ripState];
+			if(st == 2) anyTrackActive = YES;
+			if(checkArray && i < (int)[checkArray count])
+				[[checkArray objectAtIndex:i] setAlphaValue:(st == 3 ? 0.4 : 1.0)];
+		}
+		[o_trackTable setNeedsDisplay:YES];
+	}
+
+	if(!anyActive && !anyTrackActive) {
 		[scanAnimTimer invalidate];
 		[scanAnimTimer release];
 		scanAnimTimer = nil;
 	}
+}
+
+/* Grey the title (and every column) of a finished track; normal otherwise. */
+- (void)tableView:(NSTableView *)tv willDisplayCell:(id)cell forTableColumn:(NSTableColumn *)col row:(NSInteger)row
+{
+	if(tv != o_trackTable || ![cell respondsToSelector:@selector(setTextColor:)]) return;
+	int st = [self ripStateForRow:row];
+	NSColor *c;
+	if(st == 3) c = [NSColor disabledControlTextColor];
+	else if([tv isRowSelected:row]) c = [NSColor alternateSelectedControlTextColor];
+	else c = [NSColor controlTextColor];
+	[cell setTextColor:c];
 }
 
 /* The /dev/disk device backing a row, whether it is still scanning or opened. */
@@ -532,6 +564,16 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		if(dev && [delegate isDeviceRipping:dev]) return 0.0;
 	}
 	return -1.0;
+}
+
+/* Inline rip state of a track row: 0 idle, 2 ripping (Cylon), 3 done (greyed). */
+- (int)ripStateForRow:(NSInteger)row
+{
+	id parser = [self cueParser];
+	if(!parser) return 0;
+	NSArray *tl = [parser trackList];
+	if(row < 0 || row >= (NSInteger)[tl count]) return 0;
+	return [[tl objectAtIndex:row] ripState];
 }
 
 /* A stable per-drive seed in [0,1) so each drive's Cylon sweeps on a slightly

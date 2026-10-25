@@ -377,9 +377,15 @@ static const int fontSizeForSpeed = 9;
 	[statusField setHidden:NO];
 }
 
+- (XLDTrack *)track
+{
+	return track;
+}
+
 - (void)beginConvert
 {
 	running = YES;
+	[track setRipState:2]; /* active — inline Cylon on this track's row */
 	NSString *outputPathStr;
 	BOOL hasFormatSeparatedDirectoryStructure = NO;
 	if(encoder) {
@@ -1404,6 +1410,11 @@ finish:
 - (BOOL)isActive
 {
 	return running;
+}
+
+- (BOOL)wasCancelled
+{
+	return stopConvert;
 }
 
 - (void)setScaleType:(XLDScaleType)type

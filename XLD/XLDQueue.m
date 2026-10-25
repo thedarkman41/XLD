@@ -112,6 +112,15 @@ extern int XLDDarkModeSupportEnabled;
 - (void)convertFinished:(id)task
 {
 	[lock lock];
+	/* Grey the track only on a genuine success. A cancelled or errored task
+	   returns its track to the normal (un-greyed) state. */
+	{
+		BOOL errored = ([task progressView] && [[task progressView] tag] != 0);
+		/* Grey only a task that actually ran to a successful finish. A task that
+		   never started (cancelled while waiting), was cancelled mid-rip, or
+		   errored returns its track to the normal state. */
+		[[task track] setRipState:(![task isActive] || [task wasCancelled] || errored) ? 0 : 3];
+	}
 	int idx = [taskArr indexOfObject:task];
 	XLDCDDARippingSession *rippingSession = [task rippingSession];
 	cddaRipResult *result = [task cddaRipResult];
