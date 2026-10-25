@@ -31,7 +31,18 @@ extern int XLDDarkModeSupportEnabled;
 	[item setAction:@selector(cancelAllTasks:)];
 	[toolbarItems setObject:item forKey:@"CancelAllTasks"];
 	[item release];
-	
+
+	NSToolbarItem *clearItem = [[NSToolbarItem alloc] initWithItemIdentifier:@"ClearCompleted"];
+	[clearItem setLabel:LS(@"Clear Completed")];
+	NSImage *clearImg = nil;
+	if([NSImage respondsToSelector:@selector(imageWithSystemSymbolName:accessibilityDescription:)])
+		clearImg = [NSImage imageWithSystemSymbolName:@"trash" accessibilityDescription:LS(@"Clear Completed")];
+	[clearItem setImage:clearImg ? clearImg : [NSImage imageNamed:@"cancel"]];
+	[clearItem setTarget:self];
+	[clearItem setAction:@selector(clearCompletedTasks:)];
+	[toolbarItems setObject:clearItem forKey:@"ClearCompleted"];
+	[clearItem release];
+
 	NSToolbar *theBar = [[NSToolbar alloc] initWithIdentifier:@"XLDProgressToolbar"];
 	[theBar setDelegate:self];
 	[o_mainPanel setToolbar:theBar];
@@ -133,6 +144,21 @@ extern int XLDDarkModeSupportEnabled;
 	if([task isActive]) { NSString *k = [task atomicKey]; if(k) [busyDevices removeObject:k]; }
 	[taskArr removeObjectAtIndex:idx];
 	[o_tableView reloadData];
+
+	/* A task the user removed (the row's × button, or Cancel All Tasks) drops its
+	   row entirely and the rows below slide up to fill the gap. A task that
+	   finished on its own keeps its row (it shows "Completed"/error until the
+	   queue goes idle or the user hits Clear Completed). */
+	if([task wasCancelled]) {
+		NSView *pv = [task progressView];
+		int vIdx = pv ? [progressViewArr indexOfObject:pv] : NSNotFound;
+		if(vIdx != NSNotFound) {
+			[pv removeFromSuperview];
+			[progressViewArr removeObjectAtIndex:vIdx];
+			[o_tableView reloadData];
+			[self relayoutProgressViewsAnimated:YES];
+		}
+	}
 	
 	/* Consider every queued task; canStartTask: applies the right gate per task
 	   (drive-free for rips, Maximum #Threads for file transcodes), so rips in
@@ -285,6 +311,58 @@ extern int XLDDarkModeSupportEnabled;
 	//[lock unlock];
 }
 
+/* Reposition every progress row to its slot. Animated gives the slide-up when a
+   row above it is removed; the rows are manual subviews over an empty cell-based
+   table, so they are moved by frame rather than by the table itself. */
+- (void)relayoutProgressViewsAnimated:(BOOL)animated
+{
+	int i;
+	if(animated) {
+		[NSAnimationContext beginGrouping];
+		[[NSAnimationContext currentContext] setDuration:0.22];
+	}
+	for(i=0;i<[progressViewArr count];i++) {
+		NSView *v = [progressViewArr objectAtIndex:i];
+		NSRect f = [o_tableView frameOfCellAtColumn:0 row:i];
+		if(animated) [[v animator] setFrame:f];
+		else [v setFrame:f];
+	}
+	if(animated) [NSAnimationContext endGrouping];
+	/* Keep each live task's row index in sync with its new slot. */
+	for(i=0;i<[taskArr count];i++) {
+		id t = [taskArr objectAtIndex:i];
+		int vIdx = [progressViewArr indexOfObject:[t progressView]];
+		if(vIdx != NSNotFound) [t setPosition:vIdx];
+	}
+}
+
+/* Drop every finished row (completed or errored — anything no longer among the
+   active/waiting tasks) and slide the rest up. */
+- (IBAction)clearCompletedTasks:(id)sender
+{
+	[lock lock];
+	int i,j;
+	for(i=[progressViewArr count]-1;i>=0;i--) {
+		NSView *v = [progressViewArr objectAtIndex:i];
+		BOOL active = NO;
+		for(j=0;j<[taskArr count];j++) {
+			if([[taskArr objectAtIndex:j] progressView] == v) { active = YES; break; }
+		}
+		if(!active) {
+			[v removeFromSuperview];
+			[progressViewArr removeObjectAtIndex:i];
+		}
+	}
+	[o_tableView reloadData];
+	[self relayoutProgressViewsAnimated:YES];
+	if(![progressViewArr count]) {
+		[o_mainPanel close];
+		selectedRow = -1;
+		lowestActivePosition = 0;
+	}
+	[lock unlock];
+}
+
 - (void)setMenuForItem:(id)item
 {
 	[item setMenu:o_menu];
@@ -328,17 +406,20 @@ extern int XLDDarkModeSupportEnabled;
 
 -(NSArray *) toolbarDefaultItemIdentifiers:(NSToolbar*)toolbar
 {
-	return [NSArray arrayWithObjects:NSToolbarFlexibleSpaceItemIdentifier,@"CancelAllTasks",nil];
+	return [NSArray arrayWithObjects:NSToolbarFlexibleSpaceItemIdentifier,@"ClearCompleted",@"CancelAllTasks",nil];
 }
 
 -(NSArray *) toolbarAllowedItemIdentifiers:(NSToolbar*)toolbar
 {
-	return [NSArray arrayWithObjects:NSToolbarFlexibleSpaceItemIdentifier,@"CancelAllTasks",nil];
+	return [NSArray arrayWithObjects:NSToolbarFlexibleSpaceItemIdentifier,@"ClearCompleted",@"CancelAllTasks",nil];
 }
 
 - (BOOL)validateToolbarItem:(NSToolbarItem *)theItem
 {
 	if([[theItem itemIdentifier] isEqualToString:@"CancelAllTasks"]) return (threadsOccupied > 0);
+	/* Enabled whenever there is at least one finished row (more rows shown than
+	   active/waiting tasks) to clear. */
+	if([[theItem itemIdentifier] isEqualToString:@"ClearCompleted"]) return ([progressViewArr count] > [taskArr count]);
 	return YES;
 }
 

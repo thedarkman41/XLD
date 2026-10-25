@@ -673,6 +673,22 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	[util setMail:[o_cddbMail stringValue]];
 	if(useProxy) [util setProxyServer:[o_cddbProxyServer stringValue] port:[o_cddbProxyServerPort intValue] user:[o_cddbProxyUser stringValue] passwd:[o_cddbProxyPassword stringValue]];
 	int ret = [util query];
+	/* The disc-level query has no retry of its own, unlike the cover fetch and the
+	   MusicBrainz text fill. When several lookups happen in a burst — the disc just
+	   ripped gets MusicBrainz-tagged while one or more freshly inserted discs each
+	   query at the same time — the service rate-limits and the query comes back as a
+	   connection error (-1), leaving the disc as a generic "Audio CD" with no title,
+	   artist, or artwork and never trying again. Retry a few times with backoff so a
+	   transient rate-limit recovers on its own (this is why one disc could still be
+	   looked up "after a long time" while the earlier ones were abandoned). */
+	{
+		int qattempt = 0;
+		while(ret == -1 && qattempt < 3) {
+			qattempt++;
+			[NSThread sleepForTimeInterval:(NSTimeInterval)(2*qattempt)];
+			ret = [util query];
+		}
+	}
 	id hasMetadata = [[[[cueParser trackList] objectAtIndex:0] metadata] objectForKey:@"HasMetadata"];
 	if(ret == 0) {
 		[util readCDDBWithInfo:nil];
@@ -2118,6 +2134,32 @@ end:
 	xldoffset_t offset = 588*([o_htoaLengthM intValue]*60*75+[o_htoaLengthS intValue]*75+[o_htoaLengthF intValue]);
 	BOOL prepended = [[o_htoaStyle selectedCell] tag] == 0 ? YES : NO;
 	[self openFolder:[op filename] offset:offset prepended:prepended];
+}
+
+/* Clicking the cover art opens this disc's MusicBrainz page in the default
+   browser: the exact release when we have its MBID (from the CDDB/MusicBrainz
+   lookup, stored per track as MB_ALBUMID), otherwise a MusicBrainz release
+   search for the album. */
+- (IBAction)openMusicBrainzPage:(id)sender
+{
+	id cueParser = [discView cueParser];
+	NSString *urlStr = nil;
+	if(cueParser && [[cueParser trackList] count]) {
+		NSString *releaseID = [[[[cueParser trackList] objectAtIndex:0] metadata] objectForKey:XLD_METADATA_MB_ALBUMID];
+		if([releaseID length])
+			urlStr = [NSString stringWithFormat:@"https://musicbrainz.org/release/%@",releaseID];
+	}
+	if(!urlStr) {
+		NSString *artist = cueParser ? [cueParser artist] : nil;
+		NSString *title = cueParser ? [cueParser title] : nil;
+		NSMutableString *q = [NSMutableString string];
+		if([artist length] && [artist rangeOfString:@"Various"].location != 0) [q appendFormat:@"%@ ",artist];
+		if([title length]) [q appendString:title];
+		if(![q length]) { NSBeep(); return; }
+		NSString *enc = [q stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+		urlStr = [NSString stringWithFormat:@"https://musicbrainz.org/search?query=%@&type=release&method=indexed",enc];
+	}
+	[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:urlStr]];
 }
 
 - (IBAction)searchCoverArt:(id)sender
@@ -3941,8 +3983,18 @@ end:
 			NSArray *args = [NSArray arrayWithObjects:ripper,trackArr,nil];
 			[self performSelectorOnMainThread:@selector(finishedReadingPregapWithTrackData:) withObject:args waitUntilDone:YES];
 			[ripper release];
+			/* Release the drive once the scan is done. Up to here this session held
+			   the optical device fd open purely to display the disc; keeping it open
+			   stopped Finder (and anything else) from mounting the disc and, across a
+			   disc change, left the old media stuck !matched — wedging the drive. The
+			   actual rip opens its own session later (beginDecode), so the scan does
+			   not need to keep this one. The fail branch above already does this;
+			   this is the matching close for a successful scan. Then (re)mount so the
+			   disc is available in Finder now that our fd is gone. */
+			[rippingSession destroy];
+			[opticalDriveManager mountDisc:dev];
 		}
-		
+
 		[trackArr release];
 		[o_detectPregapPane performSelectorOnMainThread:@selector(close) withObject:nil waitUntilDone:YES];
 		

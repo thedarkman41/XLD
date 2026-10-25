@@ -19,6 +19,15 @@ static NSMutableDictionary *sessions;
 
 + (XLDCDDARippingSession *)createSessionForDevice:(NSString *)device
 {
+    /* Close and drop any prior session for this device before overwriting the
+       dictionary entry, so its open device fd is released rather than
+       orphaned. The scan opens a session, then the rip opens a second one for
+       the same device; without this the scan's session lingers in -dealloc
+       with its fd still open. A leaked fd on the old CD media wedges the drive
+       after the disc ejects, so the next disc inserted into it is never
+       enumerated (it shows up in neither Finder nor XLD). */
+    XLDCDDARippingSession *existing = [sessions objectForKey:device];
+    if(existing) [existing destroy];
     XLDCDDARippingSession *session = [[XLDCDDARippingSession alloc] initWithDevicePath:device];
     [sessions setObject:session forKey:device];
     return [session autorelease];
@@ -51,6 +60,9 @@ static NSMutableDictionary *sessions;
 
 - (void)dealloc
 {
+    /* Backstop: never let a session go away with its device fd still open,
+       whatever path orphaned it. xld_cdda_close is idempotent. */
+    xld_cdda_close(&cdread);
     [devicePath release];
     [super dealloc];
 }

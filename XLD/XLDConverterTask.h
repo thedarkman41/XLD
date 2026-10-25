@@ -121,6 +121,7 @@
 - (void)setOffsetFixupValue:(int)value;
 - (NSView *)progressView;
 - (int)position;
+- (void)setPosition:(int)pos;
 - (void)setProcessOfExistingFiles:(int)value;
 - (void)setEmbedImages:(BOOL)flag;
 - (void)setMoveAfterFinish:(BOOL)flag;

@@ -34,6 +34,8 @@
 - (void)addTasks:(NSArray *)tasks;
 - (void)showProgress;
 - (IBAction)cancelAllTasks:(id)sender;
+- (IBAction)clearCompletedTasks:(id)sender;
+- (void)relayoutProgressViewsAnimated:(BOOL)animated;
 - (void)setMenuForItem:(id)item;
 - (BOOL)hasActiveTask;
 - (BOOL)isDeviceBusy:(NSString *)dev;

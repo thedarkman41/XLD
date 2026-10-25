@@ -194,6 +194,7 @@
 - (IBAction)donate:(id)sender;
 - (IBAction)openFolderAsDisc:(id)sender;
 - (IBAction)searchCoverArt:(id)sender;
+- (IBAction)openMusicBrainzPage:(id)sender;
 - (IBAction)associateMBDiscID:(id)sender;
 - (IBAction)reportBug:(id)sender;
 - (IBAction)getMetadataFromURL:(id)sender;

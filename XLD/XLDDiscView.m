@@ -225,7 +225,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 
 	[o_imageView setAcceptClick:YES];
 	[o_imageView setTarget:delegate];
-	[o_imageView setAction:@selector(searchCoverArt:)];
+	[o_imageView setAction:@selector(openMusicBrainzPage:)];
 	
 	if([NSCell instanceMethodForSelector:@selector(setLineBreakMode:)]) {
 		[[o_titleText cell] setLineBreakMode:NSLineBreakByTruncatingTail];

@@ -881,6 +881,9 @@ static const int fontSizeForSpeed = 9;
 		[stopButton setEnabled:NO];
 		return;
 	}
+	/* Mark a never-started task as user-cancelled too, so the queue drops its row
+	   and slides the rest up rather than leaving a gap. */
+	stopConvert = YES;
 	[self hideProgress];
 	[queue convertFinished:self];
 }
@@ -1526,6 +1529,11 @@ finish:
 - (int)position
 {
 	return position;
+}
+
+- (void)setPosition:(int)pos
+{
+	position = pos;
 }
 
 - (void)setProcessOfExistingFiles:(int)value
