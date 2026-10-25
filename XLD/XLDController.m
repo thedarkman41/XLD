@@ -802,6 +802,94 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	}
 }
 
+/* Blocking GET/POST for a request, for the background cover-fetch thread. Returns
+   nil on timeout or error. */
+- (NSData *)synchronousDataForRequest:(NSURLRequest *)req timeout:(NSTimeInterval)timeout
+{
+	__block NSData *result = nil;
+	dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+	NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err){ if(data && !err) result = [data retain]; dispatch_semaphore_signal(sem); }];
+	[task resume];
+	if(dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout*NSEC_PER_SEC))) != 0) [task cancel];
+	dispatch_release(sem);
+	return [result autorelease];
+}
+
+/* Last-resort cover art: when MusicBrainz has no image for this disc, follow the
+   release's Discogs link (Discogs usually carries the highest-resolution scan).
+   Discogs release pages sit behind a Cloudflare challenge, so the page is fetched
+   through the local FlareSolverr (the sanctioned Cloudflare bypass on this host);
+   the og:image it exposes is an i.discogs.com CDN url that downloads directly.
+   Entirely best-effort: a missing Discogs link, FlareSolverr not running, or no
+   og:image just leaves the disc without art, exactly as before. */
+- (NSData *)discogsCoverDataForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame
+{
+	NSString *ua = [NSString stringWithFormat:@"XLD/%@ ( https://tmkk.undo.jp/xld/ )",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"]];
+
+	/* 1) release MBID for this disc. */
+	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
+	[u setTracks:trackList totalFrame:totalFrame];
+	NSString *mbid = [u firstMusicBrainzReleaseID];
+	[u release];
+	if(![mbid length]) return nil;
+
+	/* 2) MusicBrainz release -> Discogs url relation. */
+	NSMutableURLRequest *relReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://musicbrainz.org/ws/2/release/%@?inc=url-rels&fmt=json",mbid]]];
+	[relReq setValue:ua forHTTPHeaderField:@"User-Agent"];
+	[relReq setTimeoutInterval:20.0];
+	NSData *relData = [self synchronousDataForRequest:relReq timeout:20.0];
+	if(!relData) return nil;
+	NSString *discogsURL = nil;
+	id relJson = [NSJSONSerialization JSONObjectWithData:relData options:0 error:nil];
+	if([relJson isKindOfClass:[NSDictionary class]]) {
+		NSArray *rels = [relJson objectForKey:@"relations"];
+		if([rels isKindOfClass:[NSArray class]]) {
+			int i;
+			for(i=0;i<[rels count];i++) {
+				id r = [rels objectAtIndex:i];
+				if([[r objectForKey:@"type"] isEqualToString:@"discogs"]) {
+					discogsURL = [[r objectForKey:@"url"] objectForKey:@"resource"];
+					break;
+				}
+			}
+		}
+	}
+	if(![discogsURL length]) return nil;
+
+	/* 3) fetch the Discogs page through local FlareSolverr (Cloudflare wall). */
+	NSDictionary *body = [NSDictionary dictionaryWithObjectsAndKeys:@"request.get",@"cmd",discogsURL,@"url",[NSNumber numberWithInt:60000],@"maxTimeout",nil];
+	NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+	if(!bodyData) return nil;
+	NSMutableURLRequest *fsReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"http://127.0.0.1:8191/v1"]];
+	[fsReq setHTTPMethod:@"POST"];
+	[fsReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+	[fsReq setHTTPBody:bodyData];
+	[fsReq setTimeoutInterval:90.0];
+	NSData *fsData = [self synchronousDataForRequest:fsReq timeout:95.0];
+	if(!fsData) return nil;
+	id fsJson = [NSJSONSerialization JSONObjectWithData:fsData options:0 error:nil];
+	NSString *html = ([fsJson isKindOfClass:[NSDictionary class]]) ? [[fsJson objectForKey:@"solution"] objectForKey:@"response"] : nil;
+	if(![html length]) return nil;
+
+	/* 4) pull the first i.discogs.com url (the og:image cover) out of the HTML. */
+	NSRange r = [html rangeOfString:@"https://i.discogs.com/"];
+	if(r.location == NSNotFound) return nil;
+	NSUInteger start = r.location, end = r.location, len = [html length];
+	while(end < len) {
+		unichar c = [html characterAtIndex:end];
+		if(c == '"' || c == '\'' || c == '<' || c == ' ' || c == '\\' || c == '\n' || c == '\r') break;
+		end++;
+	}
+	NSString *imgURLStr = [html substringWithRange:NSMakeRange(start, end-start)];
+	if(![imgURLStr length]) return nil;
+
+	/* 5) download from the CDN (not Cloudflare-walled). */
+	NSMutableURLRequest *imgReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:imgURLStr]];
+	[imgReq setValue:ua forHTTPHeaderField:@"User-Agent"];
+	[imgReq setTimeoutInterval:30.0];
+	return [self synchronousDataForRequest:imgReq timeout:30.0];
+}
+
 - (void)fetchMusicBrainzCoverInBackground:(id)cueParser
 {
 	[NSThread detachNewThreadSelector:@selector(fetchMusicBrainzCoverThread:) toTarget:self withObject:cueParser];
@@ -833,6 +921,20 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			}
 		}
 		[u release];
+		[inner release];
+	}
+	/* MusicBrainz had no image: fall back to the disc's Discogs artwork. */
+	if(![cueParser coverData]) {
+		NSAutoreleasePool *inner = [[NSAutoreleasePool alloc] init];
+		NSData *dg = [self discogsCoverDataForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames]];
+		if([dg length] && ![cueParser coverData]) {
+			NSImage *img = [[NSImage alloc] initWithData:dg];
+			if(img && [img isValid]) {
+				[cueParser setCoverData:dg];
+				[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+			}
+			if(img) [img release];
+		}
 		[inner release];
 	}
 	[pool release];
