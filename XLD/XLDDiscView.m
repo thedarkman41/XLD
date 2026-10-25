@@ -688,7 +688,9 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 {
 	int sel = [o_selectorTable selectedRow];
 	id cueParser = ([parserArray count] && sel >= 0 && sel < (int)[parserArray count]) ? [parserArray objectAtIndex:sel] : nil;
-	BOOL multi = (cueParser && [[cueParser coverImageURLs] count] > 1);
+	/* A row still scanning is an XLDScanningDisc placeholder, which has no
+	   coverImageURLs; guard so reloadData never throws on it. */
+	BOOL multi = (cueParser && [cueParser respondsToSelector:@selector(coverImageURLs)] && [[cueParser coverImageURLs] count] > 1);
 	[o_prevCoverButton setHidden:!multi];
 	[o_nextCoverButton setHidden:!multi];
 }

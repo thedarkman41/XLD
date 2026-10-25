@@ -989,6 +989,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 - (void)stepCoverImageByDelta:(int)delta
 {
 	id cueParser = [discView cueParser];
+	if(![cueParser respondsToSelector:@selector(coverImageURLs)]) return;
 	NSArray *urls = [cueParser coverImageURLs];
 	int n = (int)[urls count];
 	if(n < 2) return;
