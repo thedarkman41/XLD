@@ -43,7 +43,14 @@ enum
 	NSStringEncoding preferredEncoding;
 	NSString *mediaType;
 	XLDecoderCenter *decoderCenter;
+	NSArray *coverImageURLs; /* alternative cover-art URLs (e.g. Discogs gallery) */
+	int coverImageIndex;     /* which of coverImageURLs is currently shown */
 }
+
+- (NSArray *)coverImageURLs;
+- (void)setCoverImageURLs:(NSArray *)urls;
+- (int)coverImageIndex;
+- (void)setCoverImageIndex:(int)idx;
 
 - (id)initWithDelegate:(id)del;
 - (void)clean;

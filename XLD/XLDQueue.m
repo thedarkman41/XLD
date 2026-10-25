@@ -216,6 +216,10 @@ extern int XLDDarkModeSupportEnabled;
 			[resultObj release];
 		}
 	}
+	/* Refresh the Queue glyph's enabled state (and the busy-row Cylon) now that a
+	   task finished — it disables once nothing is ripping. */
+	if([delegate respondsToSelector:@selector(queueBusyDevicesChanged)])
+		[delegate queueBusyDevicesChanged];
 }
 
 - (void)addTask:(id)task
@@ -224,7 +228,8 @@ extern int XLDDarkModeSupportEnabled;
 		checkUpdateStatus = [delegate checkUpdateStatus];
 		if(checkUpdateStatus) [delegate setCheckUpdateStatus:NO];
 	}
-	[o_mainPanel makeKeyAndOrderFront:self];
+	/* The progress window no longer pops up on its own; it is opened from the Queue
+	   toolbar glyph. Tasks still run and track progress while it is hidden. */
 	[lock lock];
 	[taskArr addObject:task];
 	[progressViewArr addObject:[task progressView]];
@@ -242,7 +247,7 @@ extern int XLDDarkModeSupportEnabled;
 		checkUpdateStatus = [delegate checkUpdateStatus];
 		if(checkUpdateStatus) [delegate setCheckUpdateStatus:NO];
 	}
-	[o_mainPanel makeKeyAndOrderFront:self];
+	/* The progress window no longer pops up on its own (see -addTask:). */
 	int i;
 	[lock lock];
 	for(i=0;i<[tasks count];i++) {

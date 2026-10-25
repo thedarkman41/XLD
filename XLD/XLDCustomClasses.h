@@ -8,6 +8,18 @@
 
 #import <Cocoa/Cocoa.h>
 
+/* User-selectable UI accent color ("theme"). One of XLD_ACCENT_COUNT presets,
+   stored in NSUserDefaults; XLDAccentColorChangedNotification is posted when it
+   changes so views can re-tint and redraw. Index 0 (Red) is the default and
+   matches the previous fixed accent. */
+#define XLD_ACCENT_COUNT 7
+extern NSString *XLDAccentColorChangedNotification;
+NSColor *XLDThemeAccentColor(void);
+NSColor *XLDThemeAccentColorAtIndex(int idx);
+NSString *XLDThemeAccentNameAtIndex(int idx);
+int XLDThemeAccentIndex(void);
+void XLDSetThemeAccentIndex(int idx);
+
 
 @interface XLDView : NSView {
 	int tag;

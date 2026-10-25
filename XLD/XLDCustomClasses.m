@@ -14,6 +14,48 @@
 
 extern int XLDDarkModeSupportEnabled;
 
+NSString *XLDAccentColorChangedNotification = @"XLDAccentColorChangedNotification";
+
+NSColor *XLDThemeAccentColorAtIndex(int idx)
+{
+	switch(idx) {
+		case 0: return [NSColor colorWithCalibratedRed:0.90 green:0.22 blue:0.21 alpha:1.0]; /* Red */
+		case 1: return [NSColor colorWithCalibratedRed:0.98 green:0.58 blue:0.12 alpha:1.0]; /* Orange */
+		case 2: return [NSColor colorWithCalibratedRed:0.94 green:0.76 blue:0.10 alpha:1.0]; /* Yellow */
+		case 3: return [NSColor colorWithCalibratedRed:0.26 green:0.70 blue:0.32 alpha:1.0]; /* Green */
+		case 4: return [NSColor colorWithCalibratedRed:0.00 green:0.48 blue:1.00 alpha:1.0]; /* Blue */
+		case 5: return [NSColor colorWithCalibratedRed:0.48 green:0.30 blue:0.80 alpha:1.0]; /* Purple */
+		case 6: return [NSColor colorWithCalibratedRed:0.92 green:0.26 blue:0.56 alpha:1.0]; /* Pink */
+	}
+	return [NSColor colorWithCalibratedRed:0.90 green:0.22 blue:0.21 alpha:1.0];
+}
+
+NSString *XLDThemeAccentNameAtIndex(int idx)
+{
+	NSArray *names = [NSArray arrayWithObjects:@"Red",@"Orange",@"Yellow",@"Green",@"Blue",@"Purple",@"Pink",nil];
+	return (idx >= 0 && idx < (int)[names count]) ? [names objectAtIndex:idx] : @"Red";
+}
+
+int XLDThemeAccentIndex(void)
+{
+	id obj = [[NSUserDefaults standardUserDefaults] objectForKey:@"XLDAccentColorIndex"];
+	int i = obj ? [obj intValue] : 0;
+	if(i < 0 || i >= XLD_ACCENT_COUNT) i = 0;
+	return i;
+}
+
+void XLDSetThemeAccentIndex(int idx)
+{
+	if(idx < 0 || idx >= XLD_ACCENT_COUNT) return;
+	[[NSUserDefaults standardUserDefaults] setInteger:idx forKey:@"XLDAccentColorIndex"];
+	[[NSNotificationCenter defaultCenter] postNotificationName:XLDAccentColorChangedNotification object:nil];
+}
+
+NSColor *XLDThemeAccentColor(void)
+{
+	return XLDThemeAccentColorAtIndex(XLDThemeAccentIndex());
+}
+
 static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 {
 	int min = frames/samplerate/60;
@@ -915,11 +957,23 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
    distinct states, never layered red-over-cyan. */
 - (void)highlightSelectionInClipRect:(NSRect)clipRect
 {
-	NSInteger sel = [self selectedRow];
+	/* Draw the selection pill in the user's chosen accent color rather than the
+	   system highlight, so the theme recolors it. A row still being scanned shows
+	   its Cylon sweep instead (no pill). */
 	id del = [self delegate];
-	if(sel >= 0 && [del respondsToSelector:@selector(scanProgressForRow:)] && [del scanProgressForRow:sel] >= 0.0)
-		return;
-	[super highlightSelectionInClipRect:clipRect];
+	BOOL canScan = [del respondsToSelector:@selector(scanProgressForRow:)];
+	NSColor *accent = XLDThemeAccentColor();
+	[accent setFill];
+	NSIndexSet *rows = [self selectedRowIndexes];
+	NSUInteger r = [rows firstIndex];
+	while(r != NSNotFound) {
+		if(!(canScan && [del scanProgressForRow:r] >= 0.0)) {
+			NSRect rr = NSInsetRect([self rectOfRow:r], 2.0, 2.0);
+			CGFloat radius = rr.size.height/2.0;
+			[[NSBezierPath bezierPathWithRoundedRect:rr xRadius:radius yRadius:radius] fill];
+		}
+		r = [rows indexGreaterThanIndex:r];
+	}
 }
 /* A disc still being scanned gets a distinct look from the selected (showing)
    disc: a solid dark pill with a bright cyan light that sweeps back and forth

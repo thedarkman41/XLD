@@ -128,17 +128,18 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	{
 		const CGFloat H=52.0, ICON=27.0, PDW=180.0, PDH=24.0;
 		const CGFloat COLW=52.0, PD_ICONS_GAP=20.0, GROUP_RIGHT=22.0, TOP_GAP=18.0;
-		NSArray *syms   = [NSArray arrayWithObjects:@"gearshape",@"opticaldisc",@"globe",@"square.and.pencil",@"flame",nil];
-		NSArray *labels = [NSArray arrayWithObjects:LS(@"Settings"),LS(@"Rip"),LS(@"Lookup"),LS(@"Edit"),LS(@"Burn"),nil];
-		NSArray *fbacks = [NSArray arrayWithObjects:[NSImage imageNamed:NSImageNamePreferencesGeneral],[[NSWorkspace sharedWorkspace] iconForDisc],[[NSWorkspace sharedWorkspace] iconForNetwork],[NSImage imageNamed:@"metadata"],[[NSWorkspace sharedWorkspace] iconForBurn],nil];
-		id targets[5]; SEL actions[5];
+		NSArray *syms   = [NSArray arrayWithObjects:@"gearshape",@"opticaldisc",@"globe",@"square.and.pencil",@"flame",@"photo.on.rectangle",nil];
+		NSArray *labels = [NSArray arrayWithObjects:LS(@"Settings"),LS(@"Rip"),LS(@"Lookup"),LS(@"Edit"),LS(@"Burn"),LS(@"Queue"),nil];
+		NSArray *fbacks = [NSArray arrayWithObjects:[NSImage imageNamed:NSImageNamePreferencesGeneral],[[NSWorkspace sharedWorkspace] iconForDisc],[[NSWorkspace sharedWorkspace] iconForNetwork],[NSImage imageNamed:@"metadata"],[[NSWorkspace sharedWorkspace] iconForBurn],[NSImage imageNamed:NSImageNameListViewTemplate],nil];
+		id targets[6]; SEL actions[6];
 		targets[0]=delegate; actions[0]=@selector(showPreferences:);
 		targets[1]=delegate; actions[1]=@selector(beginDecode:);
 		targets[2]=delegate; actions[2]=@selector(cddbGetTracks:);
 		targets[3]=self;     actions[3]=@selector(editMetadata:);
 		targets[4]=self;     actions[4]=@selector(burn:);
+		targets[5]=delegate; actions[5]=@selector(showQueueWindow:);
 
-		CGFloat groupW = PDW + PD_ICONS_GAP + 5.0*COLW;
+		CGFloat groupW = PDW + PD_ICONS_GAP + 6.0*COLW;
 		CGFloat viewW = groupW + GROUP_RIGHT;             /* trailing pad = right offset */
 		/* Icons only (no text labels); the row is one icon tall and sits TOP_GAP
 		   below the window top (the names still show as tooltips on hover). */
@@ -153,7 +154,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		[grp addSubview:o_outputFormatPopUp];
 
 		int gi;
-		for(gi=0; gi<5; gi++) {
+		for(gi=0; gi<6; gi++) {
 			CGFloat colX = PDW + PD_ICONS_GAP + gi*COLW;
 			NSButton *b = [[[NSButton alloc] initWithFrame:NSMakeRect(colX + (COLW-ICON)/2.0, iconY, ICON, ICON)] autorelease];
 			[b setButtonType:NSMomentaryChangeButton];
@@ -172,6 +173,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 			[b setToolTip:[labels objectAtIndex:gi]];
 			[grp addSubview:b];
 			if(gi==1) o_ripButton = b; /* Rip/Transcode: its tooltip is toggled */
+			if(gi==5) { o_queueButton = b; [b setEnabled:NO]; } /* Queue: enabled only while ripping */
 		}
 
 		NSToolbarItem *groupItem = [[[NSToolbarItem alloc] initWithItemIdentifier:@"Group"] autorelease];
@@ -226,7 +228,23 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[o_imageView setAcceptClick:YES];
 	[o_imageView setTarget:delegate];
 	[o_imageView setAction:@selector(openMusicBrainzPage:)];
-	
+
+	/* Floating prev/next arrows over the cover art, shown only when a disc has more
+	   than one image to offer (e.g. Discogs front/back/disc scans). Added as
+	   subviews of the image view, pinned to its left/right edges. */
+	o_prevCoverButton = [self makeCoverArrowButtonSymbol:@"chevron.left.circle.fill" action:@selector(prevCoverImage:)];
+	o_nextCoverButton = [self makeCoverArrowButtonSymbol:@"chevron.right.circle.fill" action:@selector(nextCoverImage:)];
+	NSRect ib = [o_imageView bounds];
+	CGFloat bs = 26, pad = 4, midy = (ib.size.height - bs)/2;
+	[o_prevCoverButton setFrame:NSMakeRect(ib.origin.x + pad, ib.origin.y + midy, bs, bs)];
+	[o_nextCoverButton setFrame:NSMakeRect(ib.origin.x + ib.size.width - bs - pad, ib.origin.y + midy, bs, bs)];
+	[o_prevCoverButton setAutoresizingMask:NSViewMaxXMargin|NSViewMinYMargin|NSViewMaxYMargin];
+	[o_nextCoverButton setAutoresizingMask:NSViewMinXMargin|NSViewMinYMargin|NSViewMaxYMargin];
+	[o_prevCoverButton setHidden:YES];
+	[o_nextCoverButton setHidden:YES];
+	[o_imageView addSubview:o_prevCoverButton];
+	[o_imageView addSubview:o_nextCoverButton];
+
 	if([NSCell instanceMethodForSelector:@selector(setLineBreakMode:)]) {
 		[[o_titleText cell] setLineBreakMode:NSLineBreakByTruncatingTail];
 		[[o_artistText cell] setLineBreakMode:NSLineBreakByTruncatingTail];
@@ -618,6 +636,63 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	}
 }
 
+- (NSButton *)makeCoverArrowButtonSymbol:(NSString *)symbol action:(SEL)action
+{
+	NSButton *b = [[NSButton alloc] initWithFrame:NSMakeRect(0,0,26,26)];
+	[b setButtonType:NSMomentaryChangeButton];
+	[b setBordered:NO];
+	[b setImagePosition:NSImageOnly];
+	NSImage *img = nil;
+	if([NSImage respondsToSelector:@selector(imageWithSystemSymbolName:accessibilityDescription:)])
+		img = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil];
+	if(img) {
+		[img setSize:NSMakeSize(22,22)];
+		[b setImage:img];
+	}
+	else [b setTitle:([symbol hasPrefix:@"chevron.left"] ? @"‹" : @"›")];
+	if([b respondsToSelector:@selector(setContentTintColor:)]) [b setContentTintColor:[NSColor whiteColor]];
+	[b setTarget:delegate];
+	[b setAction:action];
+	/* A soft shadow keeps the white arrow visible over light artwork too. */
+	[b setWantsLayer:YES];
+	[[b layer] setShadowColor:[[NSColor blackColor] CGColor]];
+	[[b layer] setShadowOpacity:0.7];
+	[[b layer] setShadowRadius:2.0];
+	[[b layer] setShadowOffset:CGSizeZero];
+	return [b autorelease]; /* superview retains it on addSubview */
+}
+
+- (void)setQueueButtonEnabled:(BOOL)enabled
+{
+	[o_queueButton setEnabled:enabled];
+}
+
+/* Theme changed: re-tint every disc's track checkboxes and redraw the tables so
+   the accent pill picks up the new color. */
+- (void)applyAccentColor
+{
+	NSColor *c = XLDThemeAccentColor();
+	int i,j;
+	for(i=0;i<[parserArray count];i++) {
+		NSArray *checks = [[parserArray objectAtIndex:i] checkList];
+		for(j=0;j<[checks count];j++) {
+			id b = [checks objectAtIndex:j];
+			if([b respondsToSelector:@selector(setContentTintColor:)]) [b setContentTintColor:c];
+		}
+	}
+	[o_trackTable setNeedsDisplay:YES];
+	[o_selectorTable setNeedsDisplay:YES];
+}
+
+- (void)updateCoverNavButtons
+{
+	int sel = [o_selectorTable selectedRow];
+	id cueParser = ([parserArray count] && sel >= 0 && sel < (int)[parserArray count]) ? [parserArray objectAtIndex:sel] : nil;
+	BOOL multi = (cueParser && [[cueParser coverImageURLs] count] > 1);
+	[o_prevCoverButton setHidden:!multi];
+	[o_nextCoverButton setHidden:!multi];
+}
+
 - (void)reloadData
 {
 	[self syncOutputFormatPopUp];
@@ -629,6 +704,8 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		/* Empty state: prompt the user to pick a source. */
 		[o_imageView setDefaultString:@""];
 		[o_imageView clearImage];
+		[o_prevCoverButton setHidden:YES];
+		[o_nextCoverButton setHidden:YES];
 		/* Centered prompt in its own label; leave the real title/artist fields
 		   untouched so their layout never shifts. */
 		[o_titleText setStringValue:@""];
@@ -646,6 +723,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[o_imageView setDefaultString:@"No Image"]; /* restore normal placeholder */
 	if(![cueParser coverData]) [o_imageView clearImage];
 	else if([cueParser coverData] != [o_imageView imageData]) [o_imageView setImageData:[cueParser coverData]];
+	[self updateCoverNavButtons];
 	[self showEmptyStatePrompt:NO];
 	[o_titleText setStringValue:[cueParser title]];
 	[o_titleText setToolTip:[cueParser title]];

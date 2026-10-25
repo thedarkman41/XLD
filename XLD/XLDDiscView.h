@@ -29,6 +29,9 @@
 	NSRect titleFrame0;
 	NSTextField *o_emptyStateLabel;
 	NSButton *o_ripButton;
+	NSButton *o_prevCoverButton; /* prev/next arrows over multi-image cover art */
+	NSButton *o_nextCoverButton;
+	NSButton *o_queueButton;     /* toolbar Queue glyph; enabled only while ripping */
 
 	id delegate;
 	NSString *splitPosition;
@@ -59,6 +62,8 @@
 - (void)openCueParser:(id)parser;
 - (void)reloadData;
 - (void)startCylonAnimation;
+- (void)setQueueButtonEnabled:(BOOL)enabled;
+- (void)applyAccentColor;
 - (void)setDevice:(NSString *)dev preparing:(BOOL)flag;
 - (void)imageLoaded;
 - (NSWindow *)window;

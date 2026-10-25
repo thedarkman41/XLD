@@ -815,48 +815,95 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return [result autorelease];
 }
 
-/* Last-resort cover art: when MusicBrainz has no image for this disc, follow the
-   release's Discogs link (Discogs usually carries the highest-resolution scan).
-   Discogs release pages sit behind a Cloudflare challenge, so the page is fetched
-   through the local FlareSolverr (the sanctioned Cloudflare bypass on this host);
-   the og:image it exposes is an i.discogs.com CDN url that downloads directly.
-   Entirely best-effort: a missing Discogs link, FlareSolverr not running, or no
-   og:image just leaves the disc without art, exactly as before. */
-- (NSData *)discogsCoverDataForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame
+- (NSString *)userAgentString
 {
-	NSString *ua = [NSString stringWithFormat:@"XLD/%@ ( https://tmkk.undo.jp/xld/ )",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"]];
+	return [NSString stringWithFormat:@"XLD/%@ ( https://tmkk.undo.jp/xld/ )",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"]];
+}
 
-	/* 1) release MBID for this disc. */
+/* Download image bytes from an i.discogs.com (or any) URL. The Discogs image CDN
+   is not Cloudflare-walled, so a plain request works. */
+- (NSData *)coverDataFromURLString:(NSString *)urlStr
+{
+	if(![urlStr length]) return nil;
+	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+	[req setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
+	[req setTimeoutInterval:30.0];
+	return [self synchronousDataForRequest:req timeout:30.0];
+}
+
+/* The Discogs release URL for this disc, via the MusicBrainz release's discogs
+   url relation (e.g. https://www.discogs.com/release/900490). nil if none. */
+- (NSString *)discogsReleaseURLForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame
+{
 	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
 	[u setTracks:trackList totalFrame:totalFrame];
 	NSString *mbid = [u firstMusicBrainzReleaseID];
 	[u release];
 	if(![mbid length]) return nil;
-
-	/* 2) MusicBrainz release -> Discogs url relation. */
 	NSMutableURLRequest *relReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://musicbrainz.org/ws/2/release/%@?inc=url-rels&fmt=json",mbid]]];
-	[relReq setValue:ua forHTTPHeaderField:@"User-Agent"];
+	[relReq setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
 	[relReq setTimeoutInterval:20.0];
 	NSData *relData = [self synchronousDataForRequest:relReq timeout:20.0];
 	if(!relData) return nil;
-	NSString *discogsURL = nil;
 	id relJson = [NSJSONSerialization JSONObjectWithData:relData options:0 error:nil];
-	if([relJson isKindOfClass:[NSDictionary class]]) {
-		NSArray *rels = [relJson objectForKey:@"relations"];
-		if([rels isKindOfClass:[NSArray class]]) {
-			int i;
-			for(i=0;i<[rels count];i++) {
-				id r = [rels objectAtIndex:i];
-				if([[r objectForKey:@"type"] isEqualToString:@"discogs"]) {
-					discogsURL = [[r objectForKey:@"url"] objectForKey:@"resource"];
-					break;
+	if(![relJson isKindOfClass:[NSDictionary class]]) return nil;
+	NSArray *rels = [relJson objectForKey:@"relations"];
+	if(![rels isKindOfClass:[NSArray class]]) return nil;
+	int i;
+	for(i=0;i<[rels count];i++) {
+		id r = [rels objectAtIndex:i];
+		if([[r objectForKey:@"type"] isEqualToString:@"discogs"]) {
+			NSString *res = [[r objectForKey:@"url"] objectForKey:@"resource"];
+			if([res length]) return res;
+		}
+	}
+	return nil;
+}
+
+/* The full-size cover-art URLs for this disc from Discogs (primary first, then the
+   secondary scans — back, disc, etc.), so the UI can offer more than one image.
+   The Discogs release API returns the whole images array with i.discogs.com uris;
+   when that comes back empty (image data is sometimes gated), fall back to the
+   single og:image scraped from the release page through the local FlareSolverr.
+   Entirely best-effort: nothing found just leaves the disc as it was. */
+- (NSArray *)discogsImageURLsForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame
+{
+	NSString *discogsURL = [self discogsReleaseURLForTrackList:trackList totalFrame:totalFrame];
+	if(![discogsURL length]) return nil;
+	/* release id is the digits after /release/ */
+	NSString *releaseID = nil;
+	NSRange rr = [discogsURL rangeOfString:@"/release/"];
+	if(rr.location != NSNotFound) {
+		NSString *tail = [discogsURL substringFromIndex:rr.location + rr.length];
+		NSUInteger j = 0, tl = [tail length];
+		while(j < tl) { unichar c = [tail characterAtIndex:j]; if(c < '0' || c > '9') break; j++; }
+		if(j > 0) releaseID = [tail substringToIndex:j];
+	}
+
+	NSMutableArray *urls = [NSMutableArray array];
+	/* 1) Discogs release API (not Cloudflare-walled): the full images array. */
+	if([releaseID length]) {
+		NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://api.discogs.com/releases/%@",releaseID]]];
+		[apiReq setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
+		[apiReq setTimeoutInterval:20.0];
+		NSData *apiData = [self synchronousDataForRequest:apiReq timeout:20.0];
+		if(apiData) {
+			id apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
+			if([apiJson isKindOfClass:[NSDictionary class]]) {
+				NSArray *images = [apiJson objectForKey:@"images"];
+				if([images isKindOfClass:[NSArray class]]) {
+					int i;
+					for(i=0;i<[images count];i++) {
+						NSString *uri = [[images objectAtIndex:i] objectForKey:@"uri"];
+						if([uri length]) [urls addObject:uri];
+					}
 				}
 			}
 		}
 	}
-	if(![discogsURL length]) return nil;
+	if([urls count]) return urls;
 
-	/* 3) fetch the Discogs page through local FlareSolverr (Cloudflare wall). */
+	/* 2) Fallback: og:image scraped past Cloudflare via the local FlareSolverr. */
 	NSDictionary *body = [NSDictionary dictionaryWithObjectsAndKeys:@"request.get",@"cmd",discogsURL,@"url",[NSNumber numberWithInt:60000],@"maxTimeout",nil];
 	NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
 	if(!bodyData) return nil;
@@ -870,8 +917,6 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	id fsJson = [NSJSONSerialization JSONObjectWithData:fsData options:0 error:nil];
 	NSString *html = ([fsJson isKindOfClass:[NSDictionary class]]) ? [[fsJson objectForKey:@"solution"] objectForKey:@"response"] : nil;
 	if(![html length]) return nil;
-
-	/* 4) pull the first i.discogs.com url (the og:image cover) out of the HTML. */
 	NSRange r = [html rangeOfString:@"https://i.discogs.com/"];
 	if(r.location == NSNotFound) return nil;
 	NSUInteger start = r.location, end = r.location, len = [html length];
@@ -881,13 +926,8 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		end++;
 	}
 	NSString *imgURLStr = [html substringWithRange:NSMakeRange(start, end-start)];
-	if(![imgURLStr length]) return nil;
-
-	/* 5) download from the CDN (not Cloudflare-walled). */
-	NSMutableURLRequest *imgReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:imgURLStr]];
-	[imgReq setValue:ua forHTTPHeaderField:@"User-Agent"];
-	[imgReq setTimeoutInterval:30.0];
-	return [self synchronousDataForRequest:imgReq timeout:30.0];
+	if([imgURLStr length]) [urls addObject:imgURLStr];
+	return [urls count] ? urls : nil;
 }
 
 - (void)fetchMusicBrainzCoverInBackground:(id)cueParser
@@ -923,21 +963,67 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		[u release];
 		[inner release];
 	}
-	/* MusicBrainz had no image: fall back to the disc's Discogs artwork. */
+	/* MusicBrainz had no image: fall back to the disc's Discogs artwork, and keep
+	   the full list of Discogs images so the UI can offer prev/next over the art. */
 	if(![cueParser coverData]) {
 		NSAutoreleasePool *inner = [[NSAutoreleasePool alloc] init];
-		NSData *dg = [self discogsCoverDataForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames]];
-		if([dg length] && ![cueParser coverData]) {
+		NSArray *urls = [self discogsImageURLsForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames]];
+		if([urls count]) {
+			[cueParser setCoverImageURLs:urls];
+			[cueParser setCoverImageIndex:0];
+			NSData *dg = [self coverDataFromURLString:[urls objectAtIndex:0]];
+			if([dg length] && ![cueParser coverData]) {
+				NSImage *img = [[NSImage alloc] initWithData:dg];
+				if(img && [img isValid]) [cueParser setCoverData:dg];
+				if(img) [img release];
+			}
+			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+		}
+		[inner release];
+	}
+	[pool release];
+}
+
+/* Show another of this disc's Discogs images (delta +1 / -1), wrapping around.
+   The download runs off the main thread; the art updates when it arrives. */
+- (void)stepCoverImageByDelta:(int)delta
+{
+	id cueParser = [discView cueParser];
+	NSArray *urls = [cueParser coverImageURLs];
+	int n = (int)[urls count];
+	if(n < 2) return;
+	int idx = ([cueParser coverImageIndex] + delta + n) % n;
+	[cueParser setCoverImageIndex:idx];
+	[NSThread detachNewThreadSelector:@selector(loadCoverImageAtIndexThread:) toTarget:self withObject:cueParser];
+}
+
+- (void)loadCoverImageAtIndexThread:(id)cueParser
+{
+	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+	NSArray *urls = [cueParser coverImageURLs];
+	int idx = [cueParser coverImageIndex];
+	if(idx >= 0 && idx < (int)[urls count]) {
+		NSData *dg = [self coverDataFromURLString:[urls objectAtIndex:idx]];
+		if([dg length]) {
 			NSImage *img = [[NSImage alloc] initWithData:dg];
-			if(img && [img isValid]) {
+			if(img && [img isValid] && cueParser == [discView cueParser] && idx == [cueParser coverImageIndex]) {
 				[cueParser setCoverData:dg];
 				[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
 			}
 			if(img) [img release];
 		}
-		[inner release];
 	}
 	[pool release];
+}
+
+- (IBAction)nextCoverImage:(id)sender
+{
+	[self stepCoverImageByDelta:1];
+}
+
+- (IBAction)prevCoverImage:(id)sender
+{
+	[self stepCoverImageByDelta:-1];
 }
 
 - (void)fillMusicBrainzTextSync:(id)cueParser
@@ -4723,6 +4809,35 @@ end:
 	/* A drive started ripping: make the disc view sweep its busy rows. */
 	if([discView respondsToSelector:@selector(startCylonAnimation)])
 		[discView startCylonAnimation];
+	/* The Queue toolbar glyph is live only while something is ripping. */
+	if([discView respondsToSelector:@selector(setQueueButtonEnabled:)])
+		[discView setQueueButtonEnabled:[taskQueue hasActiveTask]];
+}
+
+/* Open the progress window on demand (it no longer pops up by itself). */
+- (IBAction)showQueueWindow:(id)sender
+{
+	[taskQueue showProgress];
+}
+
+/* Theme: pick one of the 7 accent presets (menu tag = index). */
+- (IBAction)setAccentColor:(id)sender
+{
+	XLDSetThemeAccentIndex((int)[sender tag]);
+}
+
+/* Tint the accent-following controls the theme owns outside the custom tables. */
+- (void)applyAccentToControls
+{
+	NSColor *c = XLDThemeAccentColor();
+	if([o_outputSelectRadio respondsToSelector:@selector(setContentTintColor:)]) [o_outputSelectRadio setContentTintColor:c];
+	if([o_filenameFormatRadio respondsToSelector:@selector(setContentTintColor:)]) [o_filenameFormatRadio setContentTintColor:c];
+}
+
+- (void)accentColorChanged:(NSNotification *)n
+{
+	[self applyAccentToControls];
+	if([discView respondsToSelector:@selector(applyAccentColor)]) [discView applyAccentColor];
 }
 
 - (BOOL)canSetCompilationFlag
@@ -5500,6 +5615,29 @@ fail:
 		[enableDarkModeItem release];
 	}
 #endif
+	/* "Accent Color" submenu in the application menu: 7 preset theme colors, each
+	   with a swatch; the current one is checkmarked (see -validateMenuItem:). */
+	{
+		NSMenu *accentMenu = [[[NSMenu alloc] initWithTitle:LS(@"Accent Color")] autorelease];
+		int ai;
+		for(ai=0; ai<XLD_ACCENT_COUNT; ai++) {
+			NSMenuItem *it = [[[NSMenuItem alloc] initWithTitle:LS(XLDThemeAccentNameAtIndex(ai)) action:@selector(setAccentColor:) keyEquivalent:@""] autorelease];
+			[it setTag:ai];
+			[it setTarget:self];
+			NSImage *sw = [[[NSImage alloc] initWithSize:NSMakeSize(14,14)] autorelease];
+			[sw lockFocus];
+			[XLDThemeAccentColorAtIndex(ai) setFill];
+			[[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(1,1,12,12) xRadius:3 yRadius:3] fill];
+			[sw unlockFocus];
+			[it setImage:sw];
+			[accentMenu addItem:it];
+		}
+		NSMenuItem *accentItem = [[[NSMenuItem alloc] initWithTitle:LS(@"Accent Color") action:nil keyEquivalent:@""] autorelease];
+		[accentItem setSubmenu:accentMenu];
+		[[[[NSApp mainMenu] itemAtIndex:0] submenu] insertItem:accentItem atIndex:5];
+	}
+	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(accentColorChanged:) name:XLDAccentColorChangedNotification object:nil];
+	[self applyAccentToControls];
 	{
 		NSString *customMusicAppName = [defs stringForKey:@"XLDCustomMusicAppName"];
 		if(floor(NSAppKitVersionNumber) < 1862) {
@@ -5681,6 +5819,10 @@ willBeInsertedIntoToolbar:(BOOL)willBeInserted
 
 - (BOOL)validateMenuItem:(NSMenuItem *)menuItem
 {
+	if([menuItem action] == @selector(setAccentColor:)) {
+		[menuItem setState:([menuItem tag] == XLDThemeAccentIndex()) ? NSOnState : NSOffState];
+		return YES;
+	}
 	id cueParser = [discView cueParser];
 	if([discView burning]) return NO;
     else if([menuItem action] == @selector(editMetadata:))

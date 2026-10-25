@@ -291,6 +291,7 @@ static NSString *mountNameFromBSDName(const char *bsdName)
 	if(errorMsg) [errorMsg release];
 	if(representedFilename) [representedFilename release];
 	if(mediaType) [mediaType release];
+	if(coverImageURLs) [coverImageURLs release];
 	if(decoderCenter) [decoderCenter release];
 	[super dealloc];
 }
@@ -308,6 +309,7 @@ static NSString *mountNameFromBSDName(const char *bsdName)
 	if(fileToDecode) [fileToDecode release];
 	if(title) [title release];
 	if(cover) [cover release];
+	if(coverImageURLs) [coverImageURLs release];
 	if(driveStr) [driveStr release];
 	if(discLayout) [discLayout release];
 	if(accurateRipData) [accurateRipData release];
@@ -317,6 +319,8 @@ static NSString *mountNameFromBSDName(const char *bsdName)
 	fileToDecode = nil;
 	title = nil;
 	cover = nil;
+	coverImageURLs = nil;
+	coverImageIndex = 0;
 	driveStr = nil;
 	discLayout = nil;
 	accurateRipData = nil;
@@ -1469,6 +1473,8 @@ last:
 		[button setTitle:@""];
 		[button setTarget:[delegate discView]];
 		[button setAction:@selector(checkboxStatusChanged:)];
+		/* Tint the checkbox with the current UI accent (theme). */
+		if([button respondsToSelector:@selector(setContentTintColor:)]) [button setContentTintColor:XLDThemeAccentColor()];
 		[checkList addObject:button];
 		[button release];
 	}
@@ -1527,6 +1533,8 @@ last:
 		[button setTitle:@""];
 		[button setTarget:[delegate discView]];
 		[button setAction:@selector(checkboxStatusChanged:)];
+		/* Tint the checkbox with the current UI accent (theme). */
+		if([button respondsToSelector:@selector(setContentTintColor:)]) [button setContentTintColor:XLDThemeAccentColor()];
 		[checkList addObject:button];
 		[button release];
 	}
@@ -1589,6 +1597,8 @@ last:
 		[button setTitle:@""];
 		[button setTarget:[delegate discView]];
 		[button setAction:@selector(checkboxStatusChanged:)];
+		/* Tint the checkbox with the current UI accent (theme). */
+		if([button respondsToSelector:@selector(setContentTintColor:)]) [button setContentTintColor:XLDThemeAccentColor()];
 		[checkList addObject:button];
 		[button release];
 	}
@@ -1638,6 +1648,8 @@ last:
 		[button setTitle:@""];
 		[button setTarget:[delegate discView]];
 		[button setAction:@selector(checkboxStatusChanged:)];
+		/* Tint the checkbox with the current UI accent (theme). */
+		if([button respondsToSelector:@selector(setContentTintColor:)]) [button setContentTintColor:XLDThemeAccentColor()];
 		[checkList addObject:button];
 		[button release];
 	}
@@ -1739,6 +1751,8 @@ last:
 		[button setTitle:@""];
 		[button setTarget:[delegate discView]];
 		[button setAction:@selector(checkboxStatusChanged:)];
+		/* Tint the checkbox with the current UI accent (theme). */
+		if([button respondsToSelector:@selector(setContentTintColor:)]) [button setContentTintColor:XLDThemeAccentColor()];
 		[checkList addObject:button];
 		[button release];
 	}
@@ -1906,6 +1920,8 @@ last:
 		[button setTitle:@""];
 		[button setTarget:[delegate discView]];
 		[button setAction:@selector(checkboxStatusChanged:)];
+		/* Tint the checkbox with the current UI accent (theme). */
+		if([button respondsToSelector:@selector(setContentTintColor:)]) [button setContentTintColor:XLDThemeAccentColor()];
 		[checkList addObject:button];
 		[button release];
 	}
@@ -2078,6 +2094,28 @@ last:
 - (BOOL)rawMode
 {
 	return rawMode;
+}
+
+- (NSArray *)coverImageURLs
+{
+	return coverImageURLs;
+}
+
+- (void)setCoverImageURLs:(NSArray *)urls
+{
+	if(urls == coverImageURLs) return;
+	[coverImageURLs release];
+	coverImageURLs = [urls retain];
+}
+
+- (int)coverImageIndex
+{
+	return coverImageIndex;
+}
+
+- (void)setCoverImageIndex:(int)idx
+{
+	coverImageIndex = idx;
 }
 
 - (NSData *)coverData
