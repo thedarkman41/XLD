@@ -38,6 +38,7 @@
 	id burner;
 	BOOL checkUpdateStatus;
 	int proposedRow;
+	NSTimer *scanAnimTimer;
 }
 
 - (IBAction)saveImage:(id)sender;

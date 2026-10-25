@@ -267,6 +267,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 
 - (void)dealloc
 {
+	if(scanAnimTimer) { [scanAnimTimer invalidate]; [scanAnimTimer release]; }
 	[delegate release];
 	[toolbarItems release];
 	[o_openToolbarMenu release];
@@ -395,6 +396,29 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if([parserArray count] == 1)
 		[o_selectorTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
 	[o_window makeKeyAndOrderFront:nil]; /* show the disc immediately, while it scans */
+	/* Drive the Cylon sweep on the scanning rows. Common modes so it keeps
+	   animating while a menu is open or the window is being resized. */
+	if(!scanAnimTimer) {
+		scanAnimTimer = [[NSTimer timerWithTimeInterval:1.0/30.0 target:self selector:@selector(scanAnimTick:) userInfo:nil repeats:YES] retain];
+		[[NSRunLoop currentRunLoop] addTimer:scanAnimTimer forMode:NSRunLoopCommonModes];
+	}
+}
+
+- (void)scanAnimTick:(NSTimer *)timer
+{
+	BOOL anyScanning = NO;
+	int i;
+	for(i=0;i<[parserArray count];i++) {
+		if([[parserArray objectAtIndex:i] isKindOfClass:[XLDScanningDisc class]]) {
+			anyScanning = YES;
+			[o_selectorTable setNeedsDisplayInRect:[o_selectorTable rectOfRow:i]];
+		}
+	}
+	if(!anyScanning) {
+		[scanAnimTimer invalidate];
+		[scanAnimTimer release];
+		scanAnimTimer = nil;
+	}
 }
 
 - (void)updateScanProgress:(double)frac forDevice:(NSString *)dev

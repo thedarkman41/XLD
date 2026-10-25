@@ -909,8 +909,23 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	}
 	return f;
 }
-/* For a disc still being scanned, turn the row's pill into a progress bar
-   (the delegate returns 0..1, or -1 when the row is not scanning). */
+/* While the selected row is itself being scanned, suppress the red selection
+   pill so the row shows only its Cylon sweep — scanning and selected read as two
+   distinct states, never layered red-over-cyan. */
+- (void)highlightSelectionInClipRect:(NSRect)clipRect
+{
+	NSInteger sel = [self selectedRow];
+	id del = [self delegate];
+	if(sel >= 0 && [del respondsToSelector:@selector(scanProgressForRow:)] && [del scanProgressForRow:sel] >= 0.0)
+		return;
+	[super highlightSelectionInClipRect:clipRect];
+}
+/* A disc still being scanned gets a distinct look from the selected (showing)
+   disc: a solid dark pill with a bright cyan light that sweeps back and forth
+   across it like a Cylon / KITT scanner, instead of the red selection pill and
+   instead of a left-to-right progress bar. The sweep is time-driven; XLDDiscView
+   redraws these rows on a timer. (scanProgressForRow: returns >= 0 while a row
+   is scanning, -1 otherwise.) */
 - (void)drawRow:(NSInteger)row clipRect:(NSRect)clipRect
 {
 	double p = -1.0;
@@ -919,13 +934,23 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if(p >= 0.0) {
 		NSRect r = NSInsetRect([self rectOfRow:row], 2.0, 2.0);
 		CGFloat radius = r.size.height/2.0;
-		[[NSColor colorWithCalibratedWhite:1.0 alpha:0.10] setFill];
-		[[NSBezierPath bezierPathWithRoundedRect:r xRadius:radius yRadius:radius] fill];
-		NSRect pr = r;
-		double frac = (p > 1.0) ? 1.0 : p;
-		pr.size.width = (r.size.width * frac < r.size.height) ? r.size.height : r.size.width * frac;
-		[[NSColor controlAccentColor] setFill];
-		[[NSBezierPath bezierPathWithRoundedRect:pr xRadius:radius yRadius:radius] fill];
+		NSBezierPath *pill = [NSBezierPath bezierPathWithRoundedRect:r xRadius:radius yRadius:radius];
+		[[NSColor colorWithCalibratedRed:0.11 green:0.13 blue:0.17 alpha:1.0] setFill];
+		[pill fill];
+		[NSGraphicsContext saveGraphicsState];
+		[pill addClip];
+		double t = [NSDate timeIntervalSinceReferenceDate];
+		double pos = 0.5 * (1.0 - cos(t * 4.5)); /* smooth 0..1..0 ping-pong */
+		CGFloat margin = r.size.height * 0.6;
+		CGFloat eyeX = r.origin.x + margin + (CGFloat)pos * (r.size.width - 2.0*margin);
+		CGFloat eyeY = NSMidY(r);
+		CGFloat eyeR = r.size.height * 1.25;
+		NSColor *bright = [NSColor colorWithCalibratedRed:0.45 green:0.9 blue:1.0 alpha:1.0];
+		NSColor *faint  = [NSColor colorWithCalibratedRed:0.2 green:0.55 blue:0.8 alpha:0.0];
+		NSGradient *glow = [[NSGradient alloc] initWithStartingColor:bright endingColor:faint];
+		[glow drawFromCenter:NSMakePoint(eyeX,eyeY) radius:0.0 toCenter:NSMakePoint(eyeX,eyeY) radius:eyeR options:0];
+		[glow release];
+		[NSGraphicsContext restoreGraphicsState];
 	}
 	[super drawRow:row clipRect:clipRect];
 }
