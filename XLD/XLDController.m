@@ -2439,6 +2439,12 @@ end:
 		[pref synchronize];
 		[self formatChanged:self];
 	}
+	else if(pref == [NSUserDefaults standardUserDefaults]) {
+		/* First launch (real prefs, no saved format): default to FLAC. Profile
+		   imports pass a plain dictionary and must leave the format untouched. */
+		if([o_formatList itemWithTitle:@"FLAC"]) [o_formatList selectItemWithTitle:@"FLAC"];
+		[self formatChanged:self];
+	}
 	/*if(obj=[pref objectForKey:@"OutputFormat"]) {
 	 if([obj intValue] < [o_formatList numberOfItems]) {
 	 [o_formatList selectItemAtIndex:[obj intValue]];
