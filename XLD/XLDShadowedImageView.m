@@ -44,18 +44,41 @@
 		[[NSColor controlLightHighlightColor] set];
 		NSRectFill(rect);
 		[NSGraphicsContext restoreGraphicsState];
-		
-		NSImage *imgStr = [NSImage imageWithString:defaultString?defaultString:@"No Image" withFont:[NSFont boldSystemFontOfSize:30] withColor:[NSColor lightGrayColor]];
-		/* imgStr is nil for an empty placeholder string (e.g. the empty state);
-		   skip the text then and just draw the box, and guard the width divide. */
-		if(imgStr && [imgStr size].width > 0) {
-			NSRect origRect = NSMakeRect(0, 0, [imgStr size].width, [imgStr size].height);
-			NSRect newRect;
-			newRect.size.width = viewWidth-10;
-			newRect.size.height = [imgStr size].height*(viewHeight-10)/[imgStr size].width;
-			newRect.origin.x = 5;
-			newRect.origin.y = (viewHeight-newRect.size.height)*0.5;
-			[imgStr drawInRect:newRect fromRect:origRect operation:NSCompositeSourceOver fraction:1.0];
+
+		if(coverLoadingActive) {
+			/* Cover is being fetched externally: sweep a full-height bar of the UI
+			   accent horizontally across the art box (a vertical Cylon) instead of
+			   the "No Image" text. */
+			[NSGraphicsContext saveGraphicsState];
+			[[NSBezierPath bezierPathWithRect:rect] addClip];
+			double t = [NSDate timeIntervalSinceReferenceDate];
+			double pos = 0.5 * (1.0 - cos(t * 4.1)); /* smooth 0..1..0 ping-pong */
+			CGFloat margin = rect.size.height * 0.3;
+			CGFloat sweepX = rect.origin.x + margin + (CGFloat)pos * (rect.size.width - 2.0*margin);
+			CGFloat bandW = rect.size.height * 0.9;
+			NSRect band = NSMakeRect(sweepX - bandW/2.0, rect.origin.y, bandW, rect.size.height);
+			NSColor *accent = XLDThemeAccentColor();
+			NSGradient *glow = [[NSGradient alloc] initWithColorsAndLocations:
+				[accent colorWithAlphaComponent:0.0], 0.0,
+				[accent colorWithAlphaComponent:0.85], 0.5,
+				[accent colorWithAlphaComponent:0.0], 1.0, nil];
+			[glow drawInRect:band angle:0.0];
+			[glow release];
+			[NSGraphicsContext restoreGraphicsState];
+		}
+		else {
+			NSImage *imgStr = [NSImage imageWithString:defaultString?defaultString:@"No Image" withFont:[NSFont boldSystemFontOfSize:30] withColor:[NSColor lightGrayColor]];
+			/* imgStr is nil for an empty placeholder string (e.g. the empty state);
+			   skip the text then and just draw the box, and guard the width divide. */
+			if(imgStr && [imgStr size].width > 0) {
+				NSRect origRect = NSMakeRect(0, 0, [imgStr size].width, [imgStr size].height);
+				NSRect newRect;
+				newRect.size.width = viewWidth-10;
+				newRect.size.height = [imgStr size].height*(viewHeight-10)/[imgStr size].width;
+				newRect.origin.x = 5;
+				newRect.origin.y = (viewHeight-newRect.size.height)*0.5;
+				[imgStr drawInRect:newRect fromRect:origRect operation:NSCompositeSourceOver fraction:1.0];
+			}
 		}
 		[borderColor set];
 		NSFrameRect(rect);
@@ -356,8 +379,28 @@ last:
 	}
 }
 
+- (void)setLoadingCover:(BOOL)flag
+{
+	if(flag == coverLoadingActive) { if(!flag && coverLoadingTimer) { [coverLoadingTimer invalidate]; coverLoadingTimer = nil; } return; }
+	coverLoadingActive = flag;
+	if(coverLoadingTimer) { [coverLoadingTimer invalidate]; coverLoadingTimer = nil; }
+	if(flag) {
+		coverLoadingTimer = [NSTimer timerWithTimeInterval:1.0/30.0 target:self selector:@selector(coverLoadingTick:) userInfo:nil repeats:YES];
+		[[NSRunLoop currentRunLoop] addTimer:coverLoadingTimer forMode:NSRunLoopCommonModes];
+	}
+	[self setNeedsDisplay:YES];
+}
+
+- (void)coverLoadingTick:(NSTimer *)t
+{
+	/* Stop once an image arrived; otherwise keep the sweep moving. */
+	if(image) [self setLoadingCover:NO];
+	else [self setNeedsDisplay:YES];
+}
+
 - (void)dealloc
 {
+	if(coverLoadingTimer) [coverLoadingTimer invalidate];
 	if(image) [image release];
 	if(imageData) [imageData release];
 	[self abortLoading];

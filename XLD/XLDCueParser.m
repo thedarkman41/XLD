@@ -2118,6 +2118,16 @@ last:
 	coverImageIndex = idx;
 }
 
+- (BOOL)coverLoading
+{
+	return coverLoading;
+}
+
+- (void)setCoverLoading:(BOOL)flag
+{
+	coverLoading = flag;
+}
+
 - (NSData *)coverData
 {
 	return cover;

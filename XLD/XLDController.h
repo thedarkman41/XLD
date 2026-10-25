@@ -161,6 +161,7 @@
 	id dsdConfig;
 	id opticalDriveManager;
 	BOOL ejected;
+	id overrideCueParser; /* when set, the next beginDecode: targets this disc, not the selected one (unmount handoff for parallel rips) */
 	NSString *musicAppName;
 	NSTimeInterval lastClickTime;
 	BOOL forceFullMBTag;

@@ -684,6 +684,23 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[o_selectorTable setNeedsDisplay:YES];
 }
 
+/* Reflect the selected disc's cover-loading state on the art view (drives the
+   loading Cylon). Called when a fetch starts/ends and whenever the view reloads. */
+- (void)updateCoverLoadingIndicator
+{
+	int sel = [o_selectorTable selectedRow];
+	id cueParser = ([parserArray count] && sel >= 0 && sel < (int)[parserArray count]) ? [parserArray objectAtIndex:sel] : nil;
+	BOOL loading = (cueParser && [cueParser respondsToSelector:@selector(coverLoading)] && [cueParser coverLoading] && ![cueParser coverData]);
+	if([o_imageView respondsToSelector:@selector(setLoadingCover:)]) [o_imageView setLoadingCover:loading];
+}
+
+- (void)coverLoadingChangedForParser:(id)parser
+{
+	int sel = [o_selectorTable selectedRow];
+	id selected = ([parserArray count] && sel >= 0 && sel < (int)[parserArray count]) ? [parserArray objectAtIndex:sel] : nil;
+	if(parser == selected) [self updateCoverLoadingIndicator];
+}
+
 - (void)updateCoverNavButtons
 {
 	int sel = [o_selectorTable selectedRow];
@@ -706,6 +723,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		/* Empty state: prompt the user to pick a source. */
 		[o_imageView setDefaultString:@""];
 		[o_imageView clearImage];
+		if([o_imageView respondsToSelector:@selector(setLoadingCover:)]) [o_imageView setLoadingCover:NO];
 		[o_prevCoverButton setHidden:YES];
 		[o_nextCoverButton setHidden:YES];
 		/* Centered prompt in its own label; leave the real title/artist fields
@@ -726,6 +744,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if(![cueParser coverData]) [o_imageView clearImage];
 	else if([cueParser coverData] != [o_imageView imageData]) [o_imageView setImageData:[cueParser coverData]];
 	[self updateCoverNavButtons];
+	[self updateCoverLoadingIndicator];
 	[self showEmptyStatePrompt:NO];
 	[o_titleText setStringValue:[cueParser title]];
 	[o_titleText setToolTip:[cueParser title]];

@@ -866,7 +866,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
    when that comes back empty (image data is sometimes gated), fall back to the
    single og:image scraped from the release page through the local FlareSolverr.
    Entirely best-effort: nothing found just leaves the disc as it was. */
-- (NSArray *)discogsImageURLsForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame
+- (NSDictionary *)discogsReleaseInfoForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame
 {
 	NSString *discogsURL = [self discogsReleaseURLForTrackList:trackList totalFrame:totalFrame];
 	if(![discogsURL length]) return nil;
@@ -881,7 +881,10 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	}
 
 	NSMutableArray *urls = [NSMutableArray array];
-	/* 1) Discogs release API (not Cloudflare-walled): the full images array. */
+	NSMutableArray *tracks = [NSMutableArray array];
+	NSString *album = nil, *albumArtist = nil;
+	/* 1) Discogs release API (not Cloudflare-walled): full images array AND the
+	   tracklist (used to fill track names when CDDB/MusicBrainz came back empty). */
 	if([releaseID length]) {
 		NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://api.discogs.com/releases/%@",releaseID]]];
 		[apiReq setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
@@ -898,12 +901,37 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 						if([uri length]) [urls addObject:uri];
 					}
 				}
+				album = [apiJson objectForKey:@"title"];
+				NSArray *aa = [apiJson objectForKey:@"artists"];
+				if([aa isKindOfClass:[NSArray class]] && [aa count]) albumArtist = [[aa objectAtIndex:0] objectForKey:@"name"];
+				NSArray *tl = [apiJson objectForKey:@"tracklist"];
+				if([tl isKindOfClass:[NSArray class]]) {
+					int i;
+					for(i=0;i<[tl count];i++) {
+						NSDictionary *t = [tl objectAtIndex:i];
+						if(![[t objectForKey:@"type_"] isEqualToString:@"track"]) continue; /* skip headings/index */
+						NSString *title = [t objectForKey:@"title"];
+						if(![title length]) continue;
+						NSString *artist = albumArtist;
+						NSArray *ta = [t objectForKey:@"artists"];
+						if([ta isKindOfClass:[NSArray class]] && [ta count]) artist = [[ta objectAtIndex:0] objectForKey:@"name"];
+						[tracks addObject:[NSDictionary dictionaryWithObjectsAndKeys:title,@"title",(artist?artist:@""),@"artist",nil]];
+					}
+				}
 			}
 		}
 	}
-	if([urls count]) return urls;
+	if([urls count] || [tracks count]) {
+		NSMutableDictionary *info = [NSMutableDictionary dictionary];
+		[info setObject:urls forKey:@"images"];
+		[info setObject:tracks forKey:@"tracks"];
+		if([album length]) [info setObject:album forKey:@"album"];
+		if([albumArtist length]) [info setObject:albumArtist forKey:@"albumArtist"];
+		return info;
+	}
 
-	/* 2) Fallback: og:image scraped past Cloudflare via the local FlareSolverr. */
+	/* 2) Fallback: og:image scraped past Cloudflare via the local FlareSolverr
+	   (image only; no tracklist available this way). */
 	NSDictionary *body = [NSDictionary dictionaryWithObjectsAndKeys:@"request.get",@"cmd",discogsURL,@"url",[NSNumber numberWithInt:60000],@"maxTimeout",nil];
 	NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
 	if(!bodyData) return nil;
@@ -927,7 +955,8 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	}
 	NSString *imgURLStr = [html substringWithRange:NSMakeRange(start, end-start)];
 	if([imgURLStr length]) [urls addObject:imgURLStr];
-	return [urls count] ? urls : nil;
+	if(![urls count]) return nil;
+	return [NSDictionary dictionaryWithObjectsAndKeys:urls,@"images",[NSArray array],@"tracks",nil];
 }
 
 - (void)fetchMusicBrainzCoverInBackground:(id)cueParser
@@ -938,6 +967,12 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 - (void)fetchMusicBrainzCoverThread:(id)cueParser
 {
 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+	/* Mark the cover as loading so the view sweeps a Cylon over the art area while
+	   we look it up externally, instead of showing "No Image". */
+	if([cueParser respondsToSelector:@selector(setCoverLoading:)] && ![cueParser coverData]) {
+		[cueParser setCoverLoading:YES];
+		[discView performSelectorOnMainThread:@selector(coverLoadingChangedForParser:) withObject:cueParser waitUntilDone:NO];
+	}
 	/* Retry a few times with backoff: the MusicBrainz TOC lookup and Cover Art
 	   Archive can return nothing transiently (rate limiting, especially when
 	   several discs are scanned at once), which previously left the disc with no
@@ -964,10 +999,19 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		[inner release];
 	}
 	/* MusicBrainz had no image: fall back to the disc's Discogs artwork, and keep
-	   the full list of Discogs images so the UI can offer prev/next over the art. */
+	   the full list of Discogs images so the UI can offer prev/next over the art.
+	   Retry a few times with backoff: the Discogs path needs a MusicBrainz
+	   url-rels lookup first, which gets rate-limited when several discs are scanned
+	   at once on launch, so one disc could miss its cover while another got it. */
 	if(![cueParser coverData]) {
 		NSAutoreleasePool *inner = [[NSAutoreleasePool alloc] init];
-		NSArray *urls = [self discogsImageURLsForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames]];
+		NSDictionary *info = nil;
+		int dgAttempt;
+		for(dgAttempt=0; dgAttempt<3 && ![[info objectForKey:@"images"] count] && ![cueParser coverData]; dgAttempt++) {
+			if(dgAttempt > 0) [NSThread sleepForTimeInterval:(NSTimeInterval)(dgAttempt*3)];
+			info = [self discogsReleaseInfoForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames]];
+		}
+		NSArray *urls = [info objectForKey:@"images"];
 		if([urls count]) {
 			[cueParser setCoverImageURLs:urls];
 			[cueParser setCoverImageIndex:0];
@@ -979,9 +1023,55 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			}
 			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
 		}
+		/* Names last resort: if CDDB/MusicBrainz left the tracks unnamed, fill them
+		   from the Discogs tracklist we just fetched (mapped by order). Only fills a
+		   track still missing a title, so it never clobbers names that did arrive. */
+		if([[info objectForKey:@"tracks"] count])
+			[self performSelectorOnMainThread:@selector(fillTrackNamesFromDiscogs:) withObject:[NSArray arrayWithObjects:cueParser,info,nil] waitUntilDone:NO];
 		[inner release];
 	}
+	/* Done looking up: stop the loading sweep. */
+	if([cueParser respondsToSelector:@selector(setCoverLoading:)]) {
+		[cueParser setCoverLoading:NO];
+		[discView performSelectorOnMainThread:@selector(coverLoadingChangedForParser:) withObject:cueParser waitUntilDone:NO];
+	}
 	[pool release];
+}
+
+/* Fill still-unnamed tracks (and a missing album title/artist) from the Discogs
+   tracklist, on the main thread so metadata writes don't race the UI. */
+- (void)fillTrackNamesFromDiscogs:(NSArray *)args
+{
+	id cueParser = [args objectAtIndex:0];
+	NSDictionary *info = [args objectAtIndex:1];
+	NSArray *dgTracks = [info objectForKey:@"tracks"];
+	NSArray *trackList = [cueParser trackList];
+	if(![dgTracks count] || ![trackList count]) return;
+	/* Map Discogs audio tracks to the disc's audio tracks in order. */
+	int ti = 0, di = 0, changed = 0;
+	int tn = (int)[trackList count], dn = (int)[dgTracks count];
+	while(ti < tn && di < dn) {
+		XLDTrack *tr = [trackList objectAtIndex:ti];
+		/* Skip non-audio (data) tracks on the disc side. */
+		if([[tr metadata] objectForKey:XLD_METADATA_DATATRACK]) { ti++; continue; }
+		NSDictionary *d = [dgTracks objectAtIndex:di];
+		if(![[tr metadata] objectForKey:XLD_METADATA_TITLE]) {
+			[[tr metadata] setObject:[d objectForKey:@"title"] forKey:XLD_METADATA_TITLE];
+			if([[d objectForKey:@"artist"] length] && ![[tr metadata] objectForKey:XLD_METADATA_ARTIST])
+				[[tr metadata] setObject:[d objectForKey:@"artist"] forKey:XLD_METADATA_ARTIST];
+			changed++;
+		}
+		ti++; di++;
+	}
+	/* Album title / artist, if the disc still shows the generic placeholder. */
+	id firstMeta = [[trackList objectAtIndex:0] metadata];
+	if([[info objectForKey:@"album"] length] && ![firstMeta objectForKey:XLD_METADATA_ALBUM]) {
+		int i;
+		for(i=0;i<tn;i++) [[[trackList objectAtIndex:i] metadata] setObject:[info objectForKey:@"album"] forKey:XLD_METADATA_ALBUM];
+		if([cueParser respondsToSelector:@selector(setTitle:)]) [cueParser setTitle:[info objectForKey:@"album"]];
+		changed++;
+	}
+	if(changed) [discView reloadData];
 }
 
 /* Show another of this disc's Discogs images (delta +1 / -1), wrapping around.
@@ -1104,6 +1194,22 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		}
 	}
 	[u release];
+}
+
+/* Background half of the Rip click: do the (network) MusicBrainz tagging off the
+   main thread, then resume the rip for this disc on the main thread. */
+- (void)applyMBThenResumeRip:(id)cueParser
+{
+	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+	[self applyMusicBrainzMetadataToDisc:cueParser];
+	[self performSelectorOnMainThread:@selector(resumeRipForParser:) withObject:cueParser waitUntilDone:NO];
+	[pool release];
+}
+
+- (void)resumeRipForParser:(id)cueParser
+{
+	overrideCueParser = cueParser; /* beginDecode: skips tagging on this re-entry */
+	[self beginDecode:nil];
 }
 
 - (void)openParsedDisc:(id)cueParser originalFile:(NSString *)filename
@@ -1238,11 +1344,27 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	NSArray *trackList;
 	id resultObj = nil;
 	XLDCDDARippingSession *rippingSession = nil;
-	id cueParser = [discView cueParser];
+	/* After an async unmount, rip the disc for THAT device, not whatever is now
+	   selected — otherwise two rips started in quick succession cross each other
+	   and one gets stuck in the preparing Cylon. */
+	BOOL isReentry = (overrideCueParser != nil);
+	id cueParser = overrideCueParser ? overrideCueParser : [discView cueParser];
+	overrideCueParser = nil;
 	/* Before ripping an optical disc, make sure every track carries full
 	   MusicBrainz metadata (used both for the file tags and, below, for the
-	   SpotON folder-icon hand-off). */
-	if([[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) [self applyMusicBrainzMetadataToDisc:cueParser];
+	   SpotON folder-icon hand-off). That lookup does synchronous network calls
+	   (seconds, worse under rate-limiting), so run it on a background thread the
+	   first time rather than beachballing the whole UI on the Rip click; sweep the
+	   preparing Cylon meanwhile, then resume the rip for this disc. On the resume
+	   (and the later unmount re-entry) the tagging is skipped — it was attempted
+	   already, so we never re-block or loop even if it found nothing. */
+	if(!isReentry && [[cueParser fileToDecode] hasPrefix:@"/dev/disk"]
+	   && [[cueParser trackList] count]
+	   && ![[[[cueParser trackList] objectAtIndex:0] metadata] objectForKey:@"XLDMBTagged"]) {
+		[discView setDevice:[cueParser fileToDecode] preparing:YES];
+		[NSThread detachNewThreadSelector:@selector(applyMBThenResumeRip:) toTarget:self withObject:cueParser];
+		return;
+	}
 	BOOL singleImageMode = NO;
 	if([discView extractionMode] == 2) {
 		trackList = [cueParser trackListForSingleFile];
@@ -4093,6 +4215,20 @@ end:
 
 	int i;
 	XLDCDDARippingSession *rippingSession = [XLDCDDARippingSession createSessionForDevice:dev];
+	/* The disc is unmounted just above, but cddafs can take a moment to let go of
+	   the device (more likely now that scanned discs are left mounted and several
+	   drives scan at once on launch). Retry the open a few times, unmounting again
+	   between tries, rather than giving up with "Device is busy" on a transient. */
+	{
+		int openAttempt = 0;
+		while([rippingSession open] == -1 && openAttempt < 4) {
+			openAttempt++;
+			[rippingSession destroy];
+			[NSThread sleepForTimeInterval:(NSTimeInterval)(0.5 * openAttempt)];
+			[opticalDriveManager unmountDisc:dev];
+			rippingSession = [XLDCDDARippingSession createSessionForDevice:dev];
+		}
+	}
 	if([rippingSession open] != -1) {
 		xld_cdread_t *cdread = [rippingSession descriptor];
 		/* driveIsBusy is per-drive now via the sessions dictionary; leave the
@@ -5878,6 +6014,10 @@ willBeInsertedIntoToolbar:(BOOL)willBeInserted
 - (void)unmountCompletedForDevice:(NSString *)dev
 {
 	ejected = YES;
+	/* Resume ripping the disc in THIS device (whichever is selected now may differ
+	   when several rips were kicked off together). */
+	id cp = [discView entryForDevice:dev];
+	if(cp) overrideCueParser = cp;
 	[self beginDecode:nil];
 }
 

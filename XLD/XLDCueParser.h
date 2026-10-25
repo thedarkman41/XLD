@@ -45,12 +45,15 @@ enum
 	XLDecoderCenter *decoderCenter;
 	NSArray *coverImageURLs; /* alternative cover-art URLs (e.g. Discogs gallery) */
 	int coverImageIndex;     /* which of coverImageURLs is currently shown */
+	BOOL coverLoading;       /* cover art is being fetched externally right now */
 }
 
 - (NSArray *)coverImageURLs;
 - (void)setCoverImageURLs:(NSArray *)urls;
 - (int)coverImageIndex;
 - (void)setCoverImageIndex:(int)idx;
+- (BOOL)coverLoading;
+- (void)setCoverLoading:(BOOL)flag;
 
 - (id)initWithDelegate:(id)del;
 - (void)clean;

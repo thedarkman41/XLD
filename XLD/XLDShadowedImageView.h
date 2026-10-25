@@ -28,7 +28,11 @@
 	NSURL *alternateURL;
 	BOOL ambiguous;
 	NSString *badge;
+	BOOL coverLoadingActive;   /* sweep a Cylon over the art area while fetching */
+	NSTimer *coverLoadingTimer;
 }
+
+- (void)setLoadingCover:(BOOL)flag;
 
 - (BOOL)setImageData:(NSData *)data;
 - (BOOL)setImageFromPath:(NSString *)path;
