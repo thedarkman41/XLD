@@ -267,7 +267,7 @@ last:
 		return nil;
 	}
 	
-	NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"http://musicbrainz.org/ws/2/release/%@?inc=artist-credits+recordings+discids+isrcs+recording-level-rels+work-level-rels+work-rels+artist-rels",releaseid]];
+	NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"http://musicbrainz.org/ws/2/release/%@?inc=artist-credits+recordings+discids+isrcs+release-groups+labels+recording-level-rels+work-level-rels+work-rels+artist-rels",releaseid]];
 	//NSLog(@"%@,%@",discid,[url description]);
 	NSData *data = [NSData fastDataWithContentsOfURL:url];
 	if(!data || [data length] == 0) {
@@ -329,7 +329,26 @@ last:
 	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Barcode"];
 	[release setObject:releaseid forKey:@"ReleaseID"];
 	[release setObject:discid forKey:@"DiscID"];
-	
+	/* Extra MusicBrainz release fields so the ripped files carry full metadata. */
+	objs = [rel nodesForXPath:@"./status" error:nil];
+	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Status"];
+	objs = [rel nodesForXPath:@"./country" error:nil];
+	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Country"];
+	objs = [rel nodesForXPath:@"./text-representation/script" error:nil];
+	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Script"];
+	objs = [rel nodesForXPath:@"./release-group/@id" error:nil];
+	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"ReleaseGroupID"];
+	objs = [rel nodesForXPath:@"./release-group/primary-type" error:nil];
+	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Type"];
+	objs = [rel nodesForXPath:@"./release-group/first-release-date" error:nil];
+	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"OriginalDate"];
+	objs = [rel nodesForXPath:@"./label-info-list/label-info/label/name" error:nil];
+	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Label"];
+	objs = [rel nodesForXPath:@"./medium-list/medium/format" error:nil];
+	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Media"];
+	objs = [rel nodesForXPath:@"./artist-credit/name-credit/artist/sort-name" error:nil];
+	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"ArtistSort"];
+
 	NSArray *discs = [rel nodesForXPath:@"./medium-list/medium" error:nil];
 	if([discs count] > 1) [release setObject:[NSNumber numberWithInt:[discs count]] forKey:@"TotalDiscs"];
 	int i,j;
@@ -407,6 +426,8 @@ last:
 				else [track setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Artist"];
 				objs = [artistNode nodesForXPath:@"./name-credit/artist/@id" error:nil];
 				if([objs count]) [track setObject:[[objs objectAtIndex:0]  stringValue] forKey:@"ArtistID"];
+				objs = [artistNode nodesForXPath:@"./name-credit/artist/sort-name" error:nil];
+				if([objs count]) [track setObject:[[objs objectAtIndex:0] stringValue] forKey:@"ArtistSort"];
 			}
 			else if([objs count]) {
 				NSArray *credits = [artistNode nodesForXPath:@"./name-credit" error:nil];

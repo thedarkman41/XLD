@@ -494,6 +494,23 @@ static char *base64enc(const unsigned  char *input, int length)
 				if([dic objectForKey:@"TotalDiscs"]) {
 					[[trk metadata] setObject:[dic objectForKey:@"TotalDiscs"] forKey:XLD_METADATA_TOTALDISCS];
 				}
+				/* Extended MusicBrainz release metadata so the files carry it all. */
+				if([dic objectForKey:@"ReleaseGroupID"]) [[trk metadata] setObject:[dic objectForKey:@"ReleaseGroupID"] forKey:XLD_METADATA_MB_RELEASEGROUPID];
+				if([dic objectForKey:@"Status"]) [[trk metadata] setObject:[dic objectForKey:@"Status"] forKey:XLD_METADATA_MB_ALBUMSTATUS];
+				if([dic objectForKey:@"Type"]) [[trk metadata] setObject:[dic objectForKey:@"Type"] forKey:XLD_METADATA_MB_ALBUMTYPE];
+				if([dic objectForKey:@"Country"]) [[trk metadata] setObject:[dic objectForKey:@"Country"] forKey:XLD_METADATA_MB_RELEASECOUNTRY];
+				if([dic objectForKey:@"Script"]) [[trk metadata] setObject:[dic objectForKey:@"Script"] forKey:XLD_METADATA_SCRIPT];
+				if([dic objectForKey:@"Label"]) [[trk metadata] setObject:[dic objectForKey:@"Label"] forKey:XLD_METADATA_LABEL];
+				if([dic objectForKey:@"Media"]) [[trk metadata] setObject:[dic objectForKey:@"Media"] forKey:XLD_METADATA_MEDIA];
+				if([dic objectForKey:@"ArtistSort"]) [[trk metadata] setObject:[dic objectForKey:@"ArtistSort"] forKey:XLD_METADATA_ALBUMARTISTSORT];
+				if([dic objectForKey:@"OriginalDate"]) {
+					NSString *od = [dic objectForKey:@"OriginalDate"];
+					[[trk metadata] setObject:od forKey:XLD_METADATA_ORIGINALDATE];
+					if([od length] >= 4) [[trk metadata] setObject:[od substringToIndex:4] forKey:XLD_METADATA_ORIGINALYEAR];
+				}
+				if([currentTrack objectForKey:@"ArtistSort"]) [[trk metadata] setObject:[currentTrack objectForKey:@"ArtistSort"] forKey:XLD_METADATA_ARTISTSORT];
+				if([currentTrack objectForKey:@"Artist"]) [[trk metadata] setObject:[currentTrack objectForKey:@"Artist"] forKey:XLD_METADATA_ARTISTS];
+				else if([[trk metadata] objectForKey:XLD_METADATA_ARTIST]) [[trk metadata] setObject:[[trk metadata] objectForKey:XLD_METADATA_ARTIST] forKey:XLD_METADATA_ARTISTS];
 			}
 			asin = [[dic objectForKey:@"ASIN"] retain];
 			mcn = [dic objectForKey:@"Barcode"];

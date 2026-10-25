@@ -276,6 +276,36 @@ extern FLAC__bool FLAC__stream_encoder_disable_verbatim_subframes(FLAC__StreamEn
 			entry.length = strlen((char *)entry.entry);
 			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
 		}
+		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_SCRIPT]) {
+			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"SCRIPT=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_SCRIPT]] UTF8String];
+			entry.length = strlen((char *)entry.entry);
+			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
+		}
+		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_LABEL]) {
+			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"LABEL=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_LABEL]] UTF8String];
+			entry.length = strlen((char *)entry.entry);
+			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
+		}
+		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_MEDIA]) {
+			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"MEDIA=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_MEDIA]] UTF8String];
+			entry.length = strlen((char *)entry.entry);
+			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
+		}
+		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_ORIGINALDATE]) {
+			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"ORIGINALDATE=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_ORIGINALDATE]] UTF8String];
+			entry.length = strlen((char *)entry.entry);
+			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
+		}
+		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_ORIGINALYEAR]) {
+			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"ORIGINALYEAR=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_ORIGINALYEAR]] UTF8String];
+			entry.length = strlen((char *)entry.entry);
+			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
+		}
+		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_ARTISTS]) {
+			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"ARTISTS=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_ARTISTS]] UTF8String];
+			entry.length = strlen((char *)entry.entry);
+			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
+		}
 		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_SMPTE_TIMECODE_START]) {
 			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"SMPTE_TIMECODE_START=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_SMPTE_TIMECODE_START]] UTF8String];
 			entry.length = strlen((char *)entry.entry);

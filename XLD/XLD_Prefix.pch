@@ -118,6 +118,12 @@ typedef enum
 #define XLD_METADATA_SMPTE_TIMECODE_DURATION	@"SMTPE Timecode Duration"
 #define XLD_METADATA_MEDIA_FPS	@"Media FPS"
 #define XLD_METADATA_FINDERLABEL @"Finder Label"
+#define XLD_METADATA_MEDIA		@"Media"
+#define XLD_METADATA_LABEL		@"Label"
+#define XLD_METADATA_ORIGINALDATE	@"OriginalDate"
+#define XLD_METADATA_ORIGINALYEAR	@"OriginalYear"
+#define XLD_METADATA_SCRIPT		@"Script"
+#define XLD_METADATA_ARTISTS		@"Artists"
 
 typedef int64_t xldoffset_t;
 
