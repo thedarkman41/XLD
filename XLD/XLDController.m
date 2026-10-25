@@ -824,25 +824,44 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 
 - (void)fillMusicBrainzTextSync:(id)cueParser
 {
+	[self fillMusicBrainzText:cueParser attempt:0];
+}
+
+- (void)fillMusicBrainzTextRetry:(NSArray *)args
+{
+	[self fillMusicBrainzText:[args objectAtIndex:0] attempt:[[args objectAtIndex:1] intValue]];
+}
+
+- (void)fillMusicBrainzText:(id)cueParser attempt:(int)attempt
+{
 	/* When the preferred CDDB service found no text for an optical disc, fill the
 	   track names/artists/album from a MusicBrainz release matched by TOC (the same
 	   match that provides the cover). Fill-only, so it never clobbers metadata the
 	   primary service did provide. Runs SYNCHRONOUSLY on the main thread — like the
 	   CDDB query it follows — so the track metadata (and the fillMBText flag) are
-	   never written concurrently with the main thread reading/rendering them. */
+	   never written concurrently with the main thread reading/rendering them.
+	   If the lookup fails (e.g. MusicBrainz rate-limiting after a prior disc's
+	   query), retry a few times with backoff, non-blocking between attempts — the
+	   cover uses a lighter path and may already have succeeded on its own. */
 	NSArray *trackList = [cueParser trackList];
 	if(![trackList count] || [[[trackList objectAtIndex:0] metadata] objectForKey:XLD_METADATA_TITLE]) return;
 	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
 	[u setPreferredService:XLDCDDBMusicBrainzPreferred];
 	[u setTracks:trackList totalFrame:(int)[cueParser totalFrames]];
 	NSString *releaseID = [u firstMusicBrainzReleaseID];
+	BOOL ok = NO;
 	if(releaseID) {
 		fillMBText = YES;
 		XLDCDDBResult r = [u readCDDBWithInfo:[NSArray arrayWithObjects:@"MusicBrainz_fromURL",@"",releaseID,nil]];
 		fillMBText = NO;
-		if(r == XLDCDDBSuccess) [discView reloadData];
+		if(r == XLDCDDBSuccess) { [discView reloadData]; ok = YES; }
 	}
 	[u release];
+	if(!ok && attempt < 4) {
+		[self performSelector:@selector(fillMusicBrainzTextRetry:)
+				   withObject:[NSArray arrayWithObjects:cueParser, [NSNumber numberWithInt:attempt+1], nil]
+				   afterDelay:(2.0 + attempt*2.0)];
+	}
 }
 
 - (void)applyMusicBrainzMetadataToDisc:(id)cueParser
