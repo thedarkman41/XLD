@@ -66,6 +66,42 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	return [NSString stringWithFormat:@"%02d:%02d:%02d",min,sec,f];
 }
 
+@implementation XLDFormatPopUpCell
+- (void)drawWithFrame:(NSRect)cellFrame inView:(NSView *)controlView
+{
+	NSRect f = NSInsetRect(cellFrame, 0.5, 0.5);
+	CGFloat radius = f.size.height/2.0;
+	NSBezierPath *pill = [NSBezierPath bezierPathWithRoundedRect:f xRadius:radius yRadius:radius];
+	[[NSColor colorWithCalibratedWhite:0.16 alpha:1.0] setFill]; /* slightly darker than the system bezel */
+	[pill fill];
+	[pill setLineWidth:1.0];
+	[[NSColor colorWithCalibratedWhite:0.33 alpha:1.0] setStroke];
+	[pill stroke];
+	/* up/down chevrons at the right */
+	CGFloat cx = NSMaxX(f) - 13.0, cy = NSMidY(f);
+	NSBezierPath *ch = [NSBezierPath bezierPath];
+	[ch moveToPoint:NSMakePoint(cx-3.0, cy+1.6)]; [ch lineToPoint:NSMakePoint(cx, cy+4.6)]; [ch lineToPoint:NSMakePoint(cx+3.0, cy+1.6)];
+	[ch moveToPoint:NSMakePoint(cx-3.0, cy-1.6)]; [ch lineToPoint:NSMakePoint(cx, cy-4.6)]; [ch lineToPoint:NSMakePoint(cx+3.0, cy-1.6)];
+	[ch setLineWidth:1.3];
+	[[NSColor colorWithCalibratedWhite:0.78 alpha:1.0] setStroke];
+	[ch stroke];
+	/* title, nudged right 2px */
+	NSString *title = [self titleOfSelectedItem];
+	if(![title length]) title = [[self selectedItem] title];
+	if([title length]) {
+		NSMutableParagraphStyle *ps = [[[NSMutableParagraphStyle alloc] init] autorelease];
+		[ps setLineBreakMode:NSLineBreakByTruncatingTail];
+		NSFont *fnt = [self font] ? [self font] : [NSFont systemFontOfSize:11];
+		NSDictionary *attrs = [NSDictionary dictionaryWithObjectsAndKeys:fnt,NSFontAttributeName,[NSColor colorWithCalibratedWhite:0.93 alpha:1.0],NSForegroundColorAttributeName,ps,NSParagraphStyleAttributeName,nil];
+		NSSize ts = [title sizeWithAttributes:attrs];
+		CGFloat tx = f.origin.x + 10.0 + 2.0; /* base padding + 2px nudge */
+		NSRect tr = NSMakeRect(tx, NSMidY(f) - ts.height/2.0, (cx - 6.0) - tx, ts.height);
+		if(tr.size.width < 0.0) tr.size.width = 0.0;
+		[title drawInRect:tr withAttributes:attrs];
+	}
+}
+@end
+
 @implementation XLDView
 
 - (int)tag

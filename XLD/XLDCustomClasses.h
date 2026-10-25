@@ -21,6 +21,12 @@ int XLDThemeAccentIndex(void);
 void XLDSetThemeAccentIndex(int idx);
 
 
+/* Output-format toolbar pull-down drawn as a darker rounded pill with the title
+   nudged right a touch (the "oval" the codec name sits in). */
+@interface XLDFormatPopUpCell : NSPopUpButtonCell {
+}
+@end
+
 @interface XLDView : NSView {
 	int tag;
 }

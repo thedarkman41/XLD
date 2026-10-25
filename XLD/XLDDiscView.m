@@ -95,8 +95,10 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if(floor(NSAppKitVersionNumber) > NSAppKitVersionNumber10_4) {
 		[o_outputFormatPopUp setBezelStyle:NSTexturedRoundedBezelStyle];
 	}
+	/* Custom cell: a slightly darker pill with the codec name nudged right 2px. */
+	if([o_outputFormatPopUp cell]) object_setClass([o_outputFormatPopUp cell], [XLDFormatPopUpCell class]);
 	[[o_outputFormatPopUp cell] setArrowPosition:NSPopUpArrowAtBottom];
-	[[o_outputFormatPopUp cell] setFont:[NSFont systemFontOfSize:12]];
+	[[o_outputFormatPopUp cell] setFont:[NSFont systemFontOfSize:11]]; /* codec font -1pt */
 	[o_outputFormatPopUp setTarget:self];
 	[o_outputFormatPopUp setAction:@selector(outputFormatChangedFromToolbar:)];
 	[[o_outputFormatPopUp menu] setDelegate:self]; /* repopulate just before it opens */
@@ -690,7 +692,13 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 {
 	int sel = [o_selectorTable selectedRow];
 	id cueParser = ([parserArray count] && sel >= 0 && sel < (int)[parserArray count]) ? [parserArray objectAtIndex:sel] : nil;
-	BOOL loading = (cueParser && [cueParser respondsToSelector:@selector(coverLoading)] && [cueParser coverLoading] && ![cueParser coverData]);
+	BOOL loading = NO;
+	if(cueParser && !([cueParser respondsToSelector:@selector(coverData)] && [cueParser coverData])) {
+		/* Sweep for the whole wait: while the disc is still scanning (placeholder),
+		   and while its artwork is being fetched externally. */
+		if([cueParser isKindOfClass:[XLDScanningDisc class]]) loading = YES;
+		else if([cueParser respondsToSelector:@selector(coverLoading)] && [cueParser coverLoading]) loading = YES;
+	}
 	if([o_imageView respondsToSelector:@selector(setLoadingCover:)]) [o_imageView setLoadingCover:loading];
 }
 

@@ -1262,8 +1262,14 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			//[discView reloadData];
 		}
 	}
+	/* Mark the cover as loading before the view first draws, so the art box shows
+	   the loading sweep continuously (no gap between the scan finishing and the
+	   fetch thread starting). */
+	if([[cueParser fileToDecode] hasPrefix:@"/dev/disk"] && ![cueParser coverData]
+	   && [cueParser respondsToSelector:@selector(setCoverLoading:)])
+		[cueParser setCoverLoading:YES];
 	[discView openCueParser:cueParser];
-	
+
 	if([[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) {
 		/* Always try to fetch cover art from MusicBrainz for an optical disc that
 		   has none, even when automatic metadata query is off (e.g. the disc's

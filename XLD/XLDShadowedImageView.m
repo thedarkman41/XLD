@@ -47,16 +47,19 @@
 
 		if(coverLoadingActive) {
 			/* Cover is being fetched externally: sweep a full-height bar of the UI
-			   accent horizontally across the art box (a vertical Cylon) instead of
-			   the "No Image" text. */
+			   accent horizontally (a vertical Cylon) over just the art area — a
+			   left-anchored square the size of the box height, where album art sits,
+			   not the full (width-stretched) box. */
+			CGFloat side = rect.size.height;
+			NSRect art = NSMakeRect(rect.origin.x, rect.origin.y, side, side);
 			[NSGraphicsContext saveGraphicsState];
-			[[NSBezierPath bezierPathWithRect:rect] addClip];
+			[[NSBezierPath bezierPathWithRect:art] addClip];
 			double t = [NSDate timeIntervalSinceReferenceDate];
 			double pos = 0.5 * (1.0 - cos(t * 4.1)); /* smooth 0..1..0 ping-pong */
-			CGFloat margin = rect.size.height * 0.3;
-			CGFloat sweepX = rect.origin.x + margin + (CGFloat)pos * (rect.size.width - 2.0*margin);
-			CGFloat bandW = rect.size.height * 0.9;
-			NSRect band = NSMakeRect(sweepX - bandW/2.0, rect.origin.y, bandW, rect.size.height);
+			CGFloat margin = art.size.height * 0.28;
+			CGFloat sweepX = art.origin.x + margin + (CGFloat)pos * (art.size.width - 2.0*margin);
+			CGFloat bandW = art.size.height * 0.85;
+			NSRect band = NSMakeRect(sweepX - bandW/2.0, art.origin.y, bandW, art.size.height);
 			NSColor *accent = XLDThemeAccentColor();
 			NSGradient *glow = [[NSGradient alloc] initWithColorsAndLocations:
 				[accent colorWithAlphaComponent:0.0], 0.0,
