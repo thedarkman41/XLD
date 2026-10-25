@@ -69,6 +69,16 @@
 	ripState = s;
 }
 
+- (double)ripProgress
+{
+	return ripProgress;
+}
+
+- (void)setRipProgress:(double)p
+{
+	ripProgress = p;
+}
+
 - (NSString *)desiredFileName
 {
 	return desiredFileName;

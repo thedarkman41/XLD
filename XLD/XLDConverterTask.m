@@ -888,6 +888,7 @@ static const int fontSizeForSpeed = 9;
 
 - (void)updateStatus
 {
+	[track setRipProgress:percent/100.0]; /* inline per-track % in the Pregap column */
 	if([progress isIndeterminate]) {
 		[speedField setStringValue:[NSString stringWithFormat:LS(@"%.1fx realtime"),speed]];
 	}

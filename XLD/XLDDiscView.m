@@ -506,6 +506,15 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 				[[checkArray objectAtIndex:i] setAlphaValue:(st == 3 ? 0.4 : 1.0)];
 		}
 		[o_trackTable setNeedsDisplay:YES];
+		/* The Pregap column shows live % while ripping, so title it "Progress". */
+		NSTableColumn *pg = [o_trackTable tableColumnWithIdentifier:@"Pregap"];
+		if(pg) {
+			NSString *want = anyTrackActive ? LS(@"Progress") : LS(@"Pregap");
+			if(![[[pg headerCell] stringValue] isEqualToString:want]) {
+				[[pg headerCell] setStringValue:want];
+				[[o_trackTable headerView] setNeedsDisplay:YES];
+			}
+		}
 	}
 
 	if(!anyActive && !anyTrackActive) {
@@ -1269,6 +1278,11 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 				return [cueParser lengthOfTrack:rowIndex];
 			}
 			else if([identifier isEqualToString:@"Pregap"]) {
+				/* While a track is ripping, show its live percentage here instead
+				   of the pregap. */
+				id trk = [[cueParser trackList] objectAtIndex:rowIndex];
+				if([trk ripState] == 2)
+					return [NSString stringWithFormat:@"%d%%", (int)([trk ripProgress]*100.0 + 0.5)];
 				return [cueParser gapOfTrack:rowIndex];
 			}
 			return nil;

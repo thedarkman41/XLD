@@ -968,11 +968,13 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 @end
 
 @implementation XLDTrackTableView
-/* The track currently being ripped shows a soft cyan Cylon sweep across its row,
-   drawn under the cell contents so the text stays readable. Completed rows are
-   greyed by the data source (attributed strings) and need no drawing here. */
+/* The track currently being ripped shows a cyan Cylon light sweeping across its
+   row. It is drawn AFTER the cells with additive (plus-lighter) blending, so it
+   brightens the row (text included) and is always visible rather than being
+   painted over by the row background. */
 - (void)drawRow:(NSInteger)row clipRect:(NSRect)clipRect
 {
+	[super drawRow:row clipRect:clipRect];
 	int st = 0;
 	id src = [self delegate];
 	if(![src respondsToSelector:@selector(ripStateForRow:)]) src = [self dataSource];
@@ -981,20 +983,20 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		NSRect r = [self rectOfRow:row];
 		[NSGraphicsContext saveGraphicsState];
 		[[NSBezierPath bezierPathWithRect:r] addClip];
+		[[NSGraphicsContext currentContext] setCompositingOperation:NSCompositingOperationPlusLighter];
 		double t = [NSDate timeIntervalSinceReferenceDate];
 		double pos = 0.5 * (1.0 - cos(t * 4.5)); /* smooth 0..1..0 ping-pong */
 		CGFloat margin = r.size.height * 2.0;
 		CGFloat eyeX = r.origin.x + margin + (CGFloat)pos * (r.size.width - 2.0*margin);
 		CGFloat eyeY = NSMidY(r);
-		CGFloat eyeR = r.size.height * 3.0;
-		NSColor *bright = [NSColor colorWithCalibratedRed:0.30 green:0.75 blue:1.0 alpha:0.55];
-		NSColor *faint  = [NSColor colorWithCalibratedRed:0.20 green:0.55 blue:0.80 alpha:0.0];
+		CGFloat eyeR = r.size.height * 2.6;
+		NSColor *bright = [NSColor colorWithCalibratedRed:0.16 green:0.42 blue:0.60 alpha:1.0];
+		NSColor *faint  = [NSColor colorWithCalibratedRed:0.0 green:0.0 blue:0.0 alpha:0.0];
 		NSGradient *glow = [[NSGradient alloc] initWithStartingColor:bright endingColor:faint];
 		[glow drawFromCenter:NSMakePoint(eyeX,eyeY) radius:0.0 toCenter:NSMakePoint(eyeX,eyeY) radius:eyeR options:0];
 		[glow release];
 		[NSGraphicsContext restoreGraphicsState];
 	}
-	[super drawRow:row clipRect:clipRect];
 }
 @end
 
