@@ -100,13 +100,13 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	/* Pull-down sized (164 x 26) and nudged up 1px (the sandbox values) by hosting
 	   it in a slightly taller container the toolbar centres. */
 	{
-		NSView *pdHost = [[[NSView alloc] initWithFrame:NSMakeRect(0,0,164,28)] autorelease];
-		[o_outputFormatPopUp setFrame:NSMakeRect(0,2,164,26)];
+		NSView *pdHost = [[[NSView alloc] initWithFrame:NSMakeRect(0,0,180,52)] autorelease];
+		[o_outputFormatPopUp setFrame:NSMakeRect(0,7,180,24)];
 		[pdHost addSubview:o_outputFormatPopUp];
 		item = [[NSToolbarItem alloc] initWithItemIdentifier:@"OutputFormat"];
 		[item setView:pdHost];
-		[item setMinSize:NSMakeSize(164,28)];
-		[item setMaxSize:NSMakeSize(164,28)];
+		[item setMinSize:NSMakeSize(180,52)];
+		[item setMaxSize:NSMakeSize(180,52)];
 	}
 	[item setLabel:LS(@"Output Format")];
 	[item setPaletteLabel:LS(@"Output Format")];
@@ -138,7 +138,20 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[toolbarItems setObject:[self labeledToolbarItem:@"EditMetadata" label:LS(@"Edit") image:[NSImage imageNamed:@"metadata"] target:self action:@selector(editMetadata:)] forKey:@"EditMetadata"];
 	[toolbarItems setObject:[self labeledToolbarItem:@"Burn" label:LS(@"Burn") image:[[NSWorkspace sharedWorkspace] iconForBurn] target:self action:@selector(burn:)] forKey:@"Burn"];
 
-	NSToolbar *theBar = [[NSToolbar alloc] initWithIdentifier:@"XLDDiscViewToolbar7"];
+	/* A fixed 22pt spacer after Burn so the right-anchored group sits that far
+	   from the window's right edge (the "offset from right" from the sandbox). */
+	{
+		NSToolbarItem *pad = [[[NSToolbarItem alloc] initWithItemIdentifier:@"RightPad"] autorelease];
+		[pad setView:[[[NSView alloc] initWithFrame:NSMakeRect(0,0,22,52)] autorelease]];
+		[pad setMinSize:NSMakeSize(22,52)];
+		[pad setMaxSize:NSMakeSize(22,52)];
+		[pad setLabel:@""];
+		[pad setPaletteLabel:LS(@"Spacer")];
+		if([pad respondsToSelector:@selector(setBordered:)]) [pad setBordered:NO];
+		[toolbarItems setObject:pad forKey:@"RightPad"];
+	}
+
+	NSToolbar *theBar = [[NSToolbar alloc] initWithIdentifier:@"XLDDiscViewToolbar8"];
 	[theBar setDelegate:self];
 	[theBar setAllowsUserCustomization:YES];
 	[theBar setAutosavesConfiguration:YES];
@@ -895,18 +908,18 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 
 -(NSArray *) toolbarDefaultItemIdentifiers:(NSToolbar*)toolbar
 {
-	return [NSArray arrayWithObjects:@"OutputFormat",
-		NSToolbarFlexibleSpaceItemIdentifier,@"Settings",
-		NSToolbarFlexibleSpaceItemIdentifier,@"Extract",
-		NSToolbarFlexibleSpaceItemIdentifier,@"GetMetadata",
-		NSToolbarFlexibleSpaceItemIdentifier,@"EditMetadata",
-		NSToolbarFlexibleSpaceItemIdentifier,@"Burn",
-		NSToolbarFlexibleSpaceItemIdentifier,nil];
+	/* A tight group anchored to the right: a leading flexible space pushes the
+	   pull-down + action icons to the right edge, and RightPad holds them that far
+	   off the edge. */
+	return [NSArray arrayWithObjects:
+		NSToolbarFlexibleSpaceItemIdentifier,
+		@"OutputFormat",@"Settings",@"Extract",@"GetMetadata",@"EditMetadata",@"Burn",
+		@"RightPad",nil];
 }
 
 -(NSArray *) toolbarAllowedItemIdentifiers:(NSToolbar*)toolbar
 {
-	return [NSArray arrayWithObjects:@"Open",@"ExtractionMode",@"OutputFormat",@"Settings",@"Extract",@"GetMetadata",@"EditMetadata",@"Burn",NSToolbarFlexibleSpaceItemIdentifier,NSToolbarSpaceItemIdentifier,NSToolbarSeparatorItemIdentifier,nil];
+	return [NSArray arrayWithObjects:@"Open",@"ExtractionMode",@"OutputFormat",@"Settings",@"Extract",@"GetMetadata",@"EditMetadata",@"Burn",@"RightPad",NSToolbarFlexibleSpaceItemIdentifier,NSToolbarSpaceItemIdentifier,NSToolbarSeparatorItemIdentifier,nil];
 }
 
 /* Build a toolbar item whose view is an icon with a small centred label beneath,
@@ -915,7 +928,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
    IconOnly), and a borderless button carries the action. */
 - (NSToolbarItem *)labeledToolbarItem:(NSString *)ident label:(NSString *)label image:(NSImage *)img target:(id)t action:(SEL)a
 {
-	const CGFloat W = 56.0, H = 48.0, ICON = 23.0, LABELH = 13.0, GAP = 2.0, ICONS_DOWN = 5.0;
+	const CGFloat W = 56.0, H = 52.0, ICON = 23.0, LABELH = 13.0, GAP = 2.0, ICONS_DOWN = 7.0;
 	/* The icon+label block is centred on the view, then nudged down by ICONS_DOWN
 	   (the offset dialled in in the sandbox) so the icons sit where they look right
 	   against the output-format pull-down. */
