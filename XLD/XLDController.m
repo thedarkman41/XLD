@@ -225,10 +225,25 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return nil;
 }
 
+/* The output plugin for the selected format, resolved by the menu item's TITLE
+   (its plugin name) rather than its index: the format menu and outputArr are not
+   index-aligned (the nib's fixed leading items vs the dynamically loaded plugin
+   list), so indexOfSelectedItem can point at the wrong encoder. */
+- (id)outputForSelectedFormat
+{
+	NSString *t = [o_formatList titleOfSelectedItem];
+	int i;
+	if(t) for(i=0;i<[outputArr count];i++)
+		if([[[[outputArr objectAtIndex:i] class] pluginName] isEqualToString:t]) return [outputArr objectAtIndex:i];
+	NSInteger idx = [o_formatList indexOfSelectedItem];
+	if(idx >= 0 && idx < [outputArr count]) return [outputArr objectAtIndex:idx];
+	return [outputArr count] ? [outputArr objectAtIndex:0] : nil;
+}
+
 - (NSString *)currentOutputFormatString
 {
 	if([[o_formatList selectedItem] tag] == 1) return @"";
-	return [[[outputArr objectAtIndex:[o_formatList indexOfSelectedItem]] class] pluginName];
+	return [[[self outputForSelectedFormat] class] pluginName];
 }
 
 - (NSString *)formattedStringForTrack:(id)trk withPattern:(NSString *)pattern singleImageMode:(BOOL)singleImageMode albumArtist:aartist
@@ -598,7 +613,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		if(fail) return NO;
 	}
 	else {
-		id outputTask = [[outputArr objectAtIndex:[o_formatList indexOfSelectedItem]] createTaskForOutput];
+		id outputTask = [[self outputForSelectedFormat] createTaskForOutput];
 		if(![(id <XLDOutputTask> )outputTask setOutputFormat:fmt]) {
 			[outputTask release];
 			return NO;
@@ -620,9 +635,10 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		[task setEncoders:[customFormatManager currentOutputArray] withConfigurations:confs];
 	}
 	else {
-		NSMutableDictionary *conf = [(id <XLDOutput>)[outputArr objectAtIndex:[o_formatList indexOfSelectedItem]] configurations];
+		id output = [self outputForSelectedFormat];
+		NSMutableDictionary *conf = [(id <XLDOutput>)output configurations];
 		[conf setObject:[NSNumber numberWithInt:[self maxThreads]] forKey:@"HintForNumThreads"];
-		[task setEncoder:[outputArr objectAtIndex:[o_formatList indexOfSelectedItem]] withConfiguration:conf];
+		[task setEncoder:output withConfiguration:conf];
 	}
 }
 
@@ -1449,7 +1465,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 - (IBAction)formatChanged:(id)sender
 {
 	if([[o_formatList selectedItem] tag] == 1) [o_formatOptionButton setEnabled:YES];
-	else if([[outputArr objectAtIndex:[o_formatList indexOfSelectedItem]] prefPane])
+	else if([[self outputForSelectedFormat] prefPane])
 		[o_formatOptionButton setEnabled:YES];
 	else [o_formatOptionButton setEnabled:NO];
 }
@@ -1465,8 +1481,8 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	}
 	else {
 		NSView *view;
-		if(![[outputArr objectAtIndex:[o_formatList indexOfSelectedItem]] prefPane]) return;
-		else view = [[outputArr objectAtIndex:[o_formatList indexOfSelectedItem]] prefPane];
+		if(![[self outputForSelectedFormat] prefPane]) return;
+		else view = [[self outputForSelectedFormat] prefPane];
 		NSRect frame = [view frame];
 		frame.size.height += 50;
 		if([[o_pluginOptionContentView subviews] count])
@@ -1490,7 +1506,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		[customFormatManager savePrefs];
 	}
 	else {
-		[[outputArr objectAtIndex:[o_formatList indexOfSelectedItem]] savePrefs];
+		[[self outputForSelectedFormat] savePrefs];
 	}
 	[o_prefPane makeKeyAndOrderFront:self];
 }
@@ -4798,7 +4814,7 @@ end:
 		[dic setObject:[customFormatManager configurations] forKey:@"CustomFormatConfigurations"];
 	}
 	else {
-		[dic addEntriesFromDictionary:(NSDictionary *)[[outputArr objectAtIndex:[o_formatList indexOfSelectedItem]] configurations]];
+		[dic addEntriesFromDictionary:(NSDictionary *)[[self outputForSelectedFormat] configurations]];
 	}
 	[dic addEntriesFromDictionary:[(XLDRenamer *)o_renamer configurations]];
 	if(dsdConfig)[dic addEntriesFromDictionary:(NSDictionary *)[dsdConfig configurations]];
