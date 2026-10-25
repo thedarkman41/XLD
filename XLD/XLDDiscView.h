@@ -28,6 +28,7 @@
 	NSMutableArray *ejectButtons;
 	NSRect titleFrame0;
 	NSTextField *o_emptyStateLabel;
+	NSTextField *o_ripLabel;
 
 	id delegate;
 	NSString *splitPosition;
