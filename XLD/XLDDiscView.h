@@ -40,6 +40,7 @@
 	BOOL checkUpdateStatus;
 	int proposedRow;
 	NSTimer *scanAnimTimer;
+	NSMutableSet *prepareDevices; /* devices waiting for the drive (show Cylon, no modal) */
 }
 
 - (IBAction)saveImage:(id)sender;
@@ -58,6 +59,7 @@
 - (void)openCueParser:(id)parser;
 - (void)reloadData;
 - (void)startCylonAnimation;
+- (void)setDevice:(NSString *)dev preparing:(BOOL)flag;
 - (void)imageLoaded;
 - (NSWindow *)window;
 - (id)cueParser;

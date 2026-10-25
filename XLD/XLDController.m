@@ -1076,16 +1076,14 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	if([[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) {
 		if(!ejected /*[opticalDriveManager isMounted:[cueParser fileToDecode]]*/) {
 			tempOutputDir = [outputDir retain];
-			[o_detectPregapPane setTitle:LS(@"Waiting")];
-			[o_detectPregapMessage setStringValue:LS(@"Waiting for Drive...")];
-			[o_detectPregapProgress setIndeterminate:YES];
-			[o_detectPregapProgress startAnimation:self];
-			[o_detectPregapPaneButton setHidden:YES];
-			[o_detectPregapPane center];
-			[o_detectPregapPane makeKeyAndOrderFront:nil];
+			/* Sweep the Cylon over the disc row instead of a "Waiting for Drive"
+			   modal while the disc unmounts. */
+			[discView setDevice:[cueParser fileToDecode] preparing:YES];
 			[NSThread detachNewThreadSelector:@selector(unmountDiscAndNotify:) toTarget:opticalDriveManager withObject:[cueParser fileToDecode]];
 			return;
 		}
+		/* Drive is ready now — stop the preparing sweep. */
+		[discView setDevice:[cueParser fileToDecode] preparing:NO];
 		if (([o_queryAccurateRip state] == NSOnState) && ([discView extractionMode] != 1)) {
 			if ([[cueParser accurateRipData] state] == kXLDAccurateRipDBStatePending) {
 				tempOutputDir = [outputDir retain];

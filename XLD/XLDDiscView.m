@@ -337,6 +337,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 - (void)dealloc
 {
 	if(scanAnimTimer) { [scanAnimTimer invalidate]; [scanAnimTimer release]; }
+	[prepareDevices release];
 	[delegate release];
 	[toolbarItems release];
 	[o_openToolbarMenu release];
@@ -567,12 +568,21 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	if(row < 0 || row >= [parserArray count]) return -1.0;
 	id p = [parserArray objectAtIndex:row];
 	if([p isKindOfClass:[XLDScanningDisc class]]) return [p scanProgress];
-	/* An opened disc whose drive is busy ripping also gets the sweep. */
-	if([delegate respondsToSelector:@selector(isDeviceRipping:)]) {
-		NSString *dev = [self deviceForRow:row];
-		if(dev && [delegate isDeviceRipping:dev]) return 0.0;
-	}
+	NSString *dev = [self deviceForRow:row];
+	/* A disc waiting for its drive (pre-rip unmount), or whose drive is busy
+	   ripping, also gets the sweep. */
+	if(dev && [prepareDevices containsObject:dev]) return 0.0;
+	if(dev && [delegate respondsToSelector:@selector(isDeviceRipping:)] && [delegate isDeviceRipping:dev]) return 0.0;
 	return -1.0;
+}
+
+- (void)setDevice:(NSString *)dev preparing:(BOOL)flag
+{
+	if(!dev) return;
+	if(!prepareDevices) prepareDevices = [[NSMutableSet alloc] init];
+	if(flag) { [prepareDevices addObject:dev]; [self startCylonAnimation]; }
+	else [prepareDevices removeObject:dev];
+	[o_selectorTable setNeedsDisplay:YES];
 }
 
 /* Inline rip state of a track row: 0 idle, 2 ripping (Cylon), 3 done (greyed). */
@@ -1283,6 +1293,8 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 				id trk = [[cueParser trackList] objectAtIndex:rowIndex];
 				if([trk ripState] == 2)
 					return [NSString stringWithFormat:@"%d%%", (int)([trk ripProgress]*100.0 + 0.5)];
+				if([trk ripState] == 3)
+					return LS(@"Complete");
 				return [cueParser gapOfTrack:rowIndex];
 			}
 			return nil;
