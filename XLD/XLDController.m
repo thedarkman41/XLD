@@ -1466,7 +1466,18 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 
 - (NSArray *)outputFormatTitles
 {
-	return [o_formatList itemTitles];
+	/* Only the real encoders for the toolbar pull-down: drop the separator, the
+	   greyed "Current encoders:" description lines, and "Multiple Formats" (which
+	   belongs in Preferences, not the quick encoder picker). */
+	NSMutableArray *titles = [NSMutableArray array];
+	NSArray *items = [o_formatList itemArray];
+	int i;
+	for(i=0;i<[items count];i++) {
+		NSMenuItem *it = [items objectAtIndex:i];
+		if([it isSeparatorItem] || ![it isEnabled] || [it tag] == 1) continue;
+		[titles addObject:[it title]];
+	}
+	return titles;
 }
 
 - (NSString *)currentOutputFormatTitle

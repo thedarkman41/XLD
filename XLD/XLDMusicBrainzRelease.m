@@ -339,7 +339,17 @@ last:
 	objs = [rel nodesForXPath:@"./release-group/@id" error:nil];
 	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"ReleaseGroupID"];
 	objs = [rel nodesForXPath:@"./release-group/primary-type" error:nil];
-	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Type"];
+	if([objs count]) {
+		NSString *primary = [[objs objectAtIndex:0] stringValue];
+		[release setObject:primary forKey:@"Type"];
+		/* Picard's RELEASETYPE is the primary plus any secondary types, lowercased
+		   and "; "-joined (e.g. "album; compilation"). */
+		NSMutableString *rt = [NSMutableString stringWithString:[primary lowercaseString]];
+		NSArray *sec = [rel nodesForXPath:@"./release-group/secondary-type-list/secondary-type" error:nil];
+		int si;
+		for(si=0;si<[sec count];si++) [rt appendFormat:@"; %@",[[[sec objectAtIndex:si] stringValue] lowercaseString]];
+		[release setObject:rt forKey:@"ReleaseType"];
+	}
 	objs = [rel nodesForXPath:@"./release-group/first-release-date" error:nil];
 	if([objs count]) [release setObject:[[objs objectAtIndex:0] stringValue] forKey:@"OriginalDate"];
 	objs = [rel nodesForXPath:@"./label-info-list/label-info/label/name" error:nil];
@@ -404,6 +414,8 @@ last:
 			objs = [tr nodesForXPath:@"./title" error:nil];
 			if(![objs count]) objs = [tr nodesForXPath:@"./recording/title" error:nil];
 			if([objs count]) [track setObject:[[objs objectAtIndex:0] stringValue] forKey:@"Title"];
+			objs = [tr nodesForXPath:@"./@id" error:nil];
+			if([objs count]) [track setObject:[[objs objectAtIndex:0] stringValue] forKey:@"ReleaseTrackID"];
 			objs = [tr nodesForXPath:@"./recording/@id" error:nil];
 			if([objs count]) {
 				[track setObject:[[objs objectAtIndex:0] stringValue] forKey:@"RecordingID"];

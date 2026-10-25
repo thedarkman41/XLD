@@ -306,6 +306,22 @@ extern FLAC__bool FLAC__stream_encoder_disable_verbatim_subframes(FLAC__StreamEn
 			entry.length = strlen((char *)entry.entry);
 			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
 		}
+		/* Picard's standard tag names for release status/type and the track MBID. */
+		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_MB_ALBUMSTATUS]) {
+			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"RELEASESTATUS=%@",[[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_MB_ALBUMSTATUS] lowercaseString]] UTF8String];
+			entry.length = strlen((char *)entry.entry);
+			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
+		}
+		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_RELEASETYPE]) {
+			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"RELEASETYPE=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_RELEASETYPE]] UTF8String];
+			entry.length = strlen((char *)entry.entry);
+			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
+		}
+		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_MB_RELEASETRACKID]) {
+			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"MUSICBRAINZ_RELEASETRACKID=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_MB_RELEASETRACKID]] UTF8String];
+			entry.length = strlen((char *)entry.entry);
+			FLAC__metadata_object_vorbiscomment_append_comment(tag,entry,true);
+		}
 		if([[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_SMPTE_TIMECODE_START]) {
 			entry.entry = (FLAC__byte *)[[NSString stringWithFormat:@"SMPTE_TIMECODE_START=%@",[[(XLDTrack *)track metadata] objectForKey:XLD_METADATA_SMPTE_TIMECODE_START]] UTF8String];
 			entry.length = strlen((char *)entry.entry);

@@ -511,6 +511,8 @@ static char *base64enc(const unsigned  char *input, int length)
 				if([currentTrack objectForKey:@"ArtistSort"]) [[trk metadata] setObject:[currentTrack objectForKey:@"ArtistSort"] forKey:XLD_METADATA_ARTISTSORT];
 				if([currentTrack objectForKey:@"Artist"]) [[trk metadata] setObject:[currentTrack objectForKey:@"Artist"] forKey:XLD_METADATA_ARTISTS];
 				else if([[trk metadata] objectForKey:XLD_METADATA_ARTIST]) [[trk metadata] setObject:[[trk metadata] objectForKey:XLD_METADATA_ARTIST] forKey:XLD_METADATA_ARTISTS];
+				if([dic objectForKey:@"ReleaseType"]) [[trk metadata] setObject:[dic objectForKey:@"ReleaseType"] forKey:XLD_METADATA_RELEASETYPE];
+				if([currentTrack objectForKey:@"ReleaseTrackID"]) [[trk metadata] setObject:[currentTrack objectForKey:@"ReleaseTrackID"] forKey:XLD_METADATA_MB_RELEASETRACKID];
 			}
 			asin = [[dic objectForKey:@"ASIN"] retain];
 			mcn = [dic objectForKey:@"Barcode"];
