@@ -123,8 +123,8 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	   intermittently in the NSScrollView titlebar-mirror path, and an
 	   NSTitlebarAccessoryViewController strip clipped the controls at the top.) */
 	{
-		const CGFloat H=56.0, ICON=23.0, PDW=180.0, PDH=24.0, LABELH=13.0, GAP=2.0;
-		const CGFloat COLW=52.0, PD_ICONS_GAP=20.0, GROUP_RIGHT=22.0, TOP_GAP=14.0;
+		const CGFloat H=52.0, ICON=27.0, PDW=180.0, PDH=24.0;
+		const CGFloat COLW=52.0, PD_ICONS_GAP=20.0, GROUP_RIGHT=22.0, TOP_GAP=18.0;
 		NSArray *syms   = [NSArray arrayWithObjects:@"gearshape",@"opticaldisc",@"globe",@"square.and.pencil",@"flame",nil];
 		NSArray *labels = [NSArray arrayWithObjects:LS(@"Settings"),LS(@"Rip"),LS(@"Lookup"),LS(@"Edit"),LS(@"Burn"),nil];
 		NSArray *fbacks = [NSArray arrayWithObjects:[NSImage imageNamed:NSImageNamePreferencesGeneral],[[NSWorkspace sharedWorkspace] iconForDisc],[[NSWorkspace sharedWorkspace] iconForNetwork],[NSImage imageNamed:@"metadata"],[[NSWorkspace sharedWorkspace] iconForBurn],nil];
@@ -137,16 +137,14 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 
 		CGFloat groupW = PDW + PD_ICONS_GAP + 5.0*COLW;
 		CGFloat viewW = groupW + GROUP_RIGHT;             /* trailing pad = right offset */
-		/* Place the icon+label block toward the bottom of the item so TOP_GAP pixels
-		   stay clear above the glyphs (the distance from the window top that reads
-		   right against the pull-down). */
-		CGFloat unitBottom = H - TOP_GAP - (ICON + GAP + LABELH);
+		/* Icons only (no text labels); the row is one icon tall and sits TOP_GAP
+		   below the window top (the names still show as tooltips on hover). */
+		CGFloat iconY = H - TOP_GAP - ICON;
 
 		NSView *grp = [[[NSView alloc] initWithFrame:NSMakeRect(0,0,viewW,H)] autorelease];
 
-		/* Pull-down vertically centred on the glyph row so the group reads as one
-		   row; rounded to whole pixels for a crisp bezel. */
-		CGFloat iconCenterY = unitBottom + LABELH + GAP + ICON/2.0;
+		/* Pull-down vertically centred on the glyph row; rounded for a crisp bezel. */
+		CGFloat iconCenterY = iconY + ICON/2.0;
 		CGFloat pdY = round(iconCenterY - PDH/2.0);
 		[o_outputFormatPopUp setFrame:NSMakeRect(0, pdY, PDW, PDH)];
 		[grp addSubview:o_outputFormatPopUp];
@@ -154,7 +152,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		int gi;
 		for(gi=0; gi<5; gi++) {
 			CGFloat colX = PDW + PD_ICONS_GAP + gi*COLW;
-			NSButton *b = [[[NSButton alloc] initWithFrame:NSMakeRect(colX + (COLW-ICON)/2.0, unitBottom + LABELH + GAP, ICON, ICON)] autorelease];
+			NSButton *b = [[[NSButton alloc] initWithFrame:NSMakeRect(colX + (COLW-ICON)/2.0, iconY, ICON, ICON)] autorelease];
 			[b setButtonType:NSMomentaryChangeButton];
 			[b setBordered:NO];
 			[b setImagePosition:NSImageOnly];
@@ -162,7 +160,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 			if([NSImage respondsToSelector:@selector(imageWithSystemSymbolName:accessibilityDescription:)])
 				img = [NSImage imageWithSystemSymbolName:[syms objectAtIndex:gi] accessibilityDescription:[labels objectAtIndex:gi]];
 			if(img && [img respondsToSelector:@selector(imageWithSymbolConfiguration:)] && NSClassFromString(@"NSImageSymbolConfiguration"))
-				img = [img imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:18.0 weight:NSFontWeightRegular]];
+				img = [img imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:21.0 weight:NSFontWeightRegular]];
 			if(!img) img = [fbacks objectAtIndex:gi];
 			[b setImage:img];
 			[[b cell] setImageScaling:NSImageScaleProportionallyUpOrDown];
@@ -170,16 +168,7 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 			[b setAction:actions[gi]];
 			[b setToolTip:[labels objectAtIndex:gi]];
 			[grp addSubview:b];
-
-			NSTextField *lbl = [[[NSTextField alloc] initWithFrame:NSMakeRect(colX, unitBottom, COLW, LABELH)] autorelease];
-			[lbl setStringValue:[labels objectAtIndex:gi]];
-			[lbl setEditable:NO]; [lbl setSelectable:NO]; [lbl setBordered:NO]; [lbl setBezeled:NO]; [lbl setDrawsBackground:NO];
-			[lbl setAlignment:NSCenterTextAlignment];
-			[lbl setFont:[NSFont systemFontOfSize:9.0]];
-			[lbl setTextColor:[NSColor secondaryLabelColor]];
-			[[lbl cell] setLineBreakMode:NSLineBreakByClipping];
-			[grp addSubview:lbl];
-			if(gi==1) o_ripLabel = lbl; /* the Rip/Transcode label */
+			if(gi==1) o_ripButton = b; /* Rip/Transcode: its tooltip is toggled */
 		}
 
 		NSToolbarItem *groupItem = [[[NSToolbarItem alloc] initWithItemIdentifier:@"Group"] autorelease];
@@ -581,10 +570,10 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[o_accurateRipStatus setStringValue:arStateString];
 	[o_totalTime setStringValue:[NSString stringWithFormat:LS(@"%@ Total"), framesToMSFStr([cueParser totalFrames], [cueParser samplerate])]];
 	[o_verify setHidden:YES]; /* Verify button removed */
-	/* "Rip" for a disc, "Transcode" for a folder/file. */
+	/* "Rip" for a disc, "Transcode" for a folder/file (shown as the glyph tooltip). */
 	{
 		BOOL isDisc = ([cueParser fileToDecode] && [[cueParser fileToDecode] hasPrefix:@"/dev/disk"]);
-		[o_ripLabel setStringValue:(isDisc ? LS(@"Rip") : LS(@"Transcode"))];
+		[o_ripButton setToolTip:(isDisc ? LS(@"Rip") : LS(@"Transcode"))];
 	}
 
 	[self removeCheckboxes];
