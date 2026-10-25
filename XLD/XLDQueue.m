@@ -67,10 +67,18 @@ extern int XLDDarkModeSupportEnabled;
    other running task is already reading that drive. (SourceForge ticket #631) */
 - (BOOL)canStartTask:(id)task
 {
-	if(threadsOccupied >= [delegate maxThreads]) return NO;
 	NSString *key = [task atomicKey];
-	if(!key) return YES;
-	return ![busyDevices containsObject:key];
+	if(key) {
+		/* A drive-reading (rip) task starts whenever its own drive is free, so
+		   discs in different drives rip in parallel regardless of the encoder
+		   "Maximum #Threads" limit (that limit is about CPU encode threads, not
+		   independent optical drives). One rip per drive still holds via
+		   busyDevices (SourceForge ticket #631). */
+		return ![busyDevices containsObject:key];
+	}
+	/* Non-drive tasks (transcode/encode of files) honour Maximum #Threads. */
+	if(threadsOccupied >= [delegate maxThreads]) return NO;
+	return YES;
 }
 
 - (void)startTask:(id)task
@@ -107,7 +115,10 @@ extern int XLDDarkModeSupportEnabled;
 	[taskArr removeObjectAtIndex:idx];
 	[o_tableView reloadData];
 	
-	for(i=0;(i<[taskArr count]) && (threadsOccupied < [delegate maxThreads]);i++) {
+	/* Consider every queued task; canStartTask: applies the right gate per task
+	   (drive-free for rips, Maximum #Threads for file transcodes), so rips in
+	   other drives resume in parallel rather than one-at-a-time. */
+	for(i=0;i<[taskArr count];i++) {
 		NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 		XLDConverterTask *nextTask = [taskArr objectAtIndex:i];
 		if(![nextTask isActive] && [self canStartTask:nextTask]) {
