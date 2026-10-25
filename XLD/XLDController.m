@@ -831,14 +831,10 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return [self synchronousDataForRequest:req timeout:30.0];
 }
 
-/* The Discogs release URL for this disc, via the MusicBrainz release's discogs
-   url relation (e.g. https://www.discogs.com/release/900490). nil if none. */
-- (NSString *)discogsReleaseURLForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame
+/* The Discogs release URL carried by a MusicBrainz release's url relations
+   (e.g. https://www.discogs.com/release/900490). nil if that release has none. */
+- (NSString *)discogsURLFromMBID:(NSString *)mbid
 {
-	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
-	[u setTracks:trackList totalFrame:totalFrame];
-	NSString *mbid = [u firstMusicBrainzReleaseID];
-	[u release];
 	if(![mbid length]) return nil;
 	NSMutableURLRequest *relReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://musicbrainz.org/ws/2/release/%@?inc=url-rels&fmt=json",mbid]]];
 	[relReq setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
@@ -860,15 +856,78 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return nil;
 }
 
+/* The Discogs release URL for this disc. First the release matched by disc id /
+   TOC; if that release has no Discogs link (common — the matched release may have
+   no disc id registered, or a different edition carries the artwork), search
+   MusicBrainz by album + artist (preferring editions with the same track count,
+   like picking the right row from the search page) and take the first candidate
+   that does link to Discogs. nil if nothing links out. */
+- (NSString *)discogsReleaseURLForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame album:(NSString *)album artist:(NSString *)artist
+{
+	/* 1) disc-id / TOC match. */
+	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
+	[u setTracks:trackList totalFrame:totalFrame];
+	NSString *mbid = [u firstMusicBrainzReleaseID];
+	[u release];
+	NSString *dg = [self discogsURLFromMBID:mbid];
+	if([dg length]) return dg;
+
+	/* 2) MusicBrainz release search by album + artist. The album/artist are the
+	   disc-level values (e.g. "Everything Is Beautiful" / "Various Artists"), not a
+	   track's own artist, so a compilation matches. */
+	if(![trackList count]) return nil;
+	NSDictionary *meta = [[trackList objectAtIndex:0] metadata];
+	if(![album length]) album = [meta objectForKey:XLD_METADATA_ALBUM];
+	if(![artist length]) artist = [meta objectForKey:XLD_METADATA_ALBUMARTIST];
+	if(![album length]) return nil;
+	int audioN = 0, i;
+	for(i=0;i<[trackList count];i++)
+		if(![[[trackList objectAtIndex:i] metadata] objectForKey:XLD_METADATA_DATATRACK]) audioN++;
+	NSString *q = [album length] ? [NSString stringWithFormat:@"release:\"%@\"", album] : nil;
+	if(!q) return nil;
+	/* artistname: (not artist:) so a "Various Artists" compilation matches. */
+	if([artist length]) q = [q stringByAppendingFormat:@" AND artistname:\"%@\"", artist];
+	NSString *enc = [q stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://musicbrainz.org/ws/2/release/?query=%@&fmt=json&limit=15",enc]]];
+	[req setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
+	[req setTimeoutInterval:20.0];
+	NSData *data = [self synchronousDataForRequest:req timeout:20.0];
+	if(!data) return nil;
+	id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+	if(![json isKindOfClass:[NSDictionary class]]) return nil;
+	NSArray *releases = [json objectForKey:@"releases"];
+	if(![releases isKindOfClass:[NSArray class]]) return nil;
+	/* Order candidates: same track count first (most likely the same edition). */
+	NSMutableArray *matched = [NSMutableArray array];
+	NSMutableArray *others = [NSMutableArray array];
+	for(i=0;i<[releases count];i++) {
+		NSDictionary *rel = [releases objectAtIndex:i];
+		NSString *cid = [rel objectForKey:@"id"];
+		if(![cid length]) continue;
+		int tc = [[rel objectForKey:@"track-count"] intValue];
+		if(audioN > 0 && tc == audioN) [matched addObject:cid];
+		else [others addObject:cid];
+	}
+	NSArray *candidates = [matched arrayByAddingObjectsFromArray:others];
+	int checked = 0;
+	for(i=0;i<[candidates count] && checked < 6;i++) {
+		if(mbid && [[candidates objectAtIndex:i] isEqualToString:mbid]) continue; /* already tried */
+		checked++;
+		NSString *cdg = [self discogsURLFromMBID:[candidates objectAtIndex:i]];
+		if([cdg length]) return cdg;
+	}
+	return nil;
+}
+
 /* The full-size cover-art URLs for this disc from Discogs (primary first, then the
    secondary scans — back, disc, etc.), so the UI can offer more than one image.
    The Discogs release API returns the whole images array with i.discogs.com uris;
    when that comes back empty (image data is sometimes gated), fall back to the
    single og:image scraped from the release page through the local FlareSolverr.
    Entirely best-effort: nothing found just leaves the disc as it was. */
-- (NSDictionary *)discogsReleaseInfoForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame
+- (NSDictionary *)discogsReleaseInfoForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame album:(NSString *)album artist:(NSString *)artist
 {
-	NSString *discogsURL = [self discogsReleaseURLForTrackList:trackList totalFrame:totalFrame];
+	NSString *discogsURL = [self discogsReleaseURLForTrackList:trackList totalFrame:totalFrame album:album artist:artist];
 	if(![discogsURL length]) return nil;
 	/* release id is the digits after /release/ */
 	NSString *releaseID = nil;
@@ -882,7 +941,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 
 	NSMutableArray *urls = [NSMutableArray array];
 	NSMutableArray *tracks = [NSMutableArray array];
-	NSString *album = nil, *albumArtist = nil;
+	NSString *dgAlbum = nil, *dgAlbumArtist = nil;
 	/* 1) Discogs release API (not Cloudflare-walled): full images array AND the
 	   tracklist (used to fill track names when CDDB/MusicBrainz came back empty). */
 	if([releaseID length]) {
@@ -901,9 +960,9 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 						if([uri length]) [urls addObject:uri];
 					}
 				}
-				album = [apiJson objectForKey:@"title"];
+				dgAlbum = [apiJson objectForKey:@"title"];
 				NSArray *aa = [apiJson objectForKey:@"artists"];
-				if([aa isKindOfClass:[NSArray class]] && [aa count]) albumArtist = [[aa objectAtIndex:0] objectForKey:@"name"];
+				if([aa isKindOfClass:[NSArray class]] && [aa count]) dgAlbumArtist = [[aa objectAtIndex:0] objectForKey:@"name"];
 				NSArray *tl = [apiJson objectForKey:@"tracklist"];
 				if([tl isKindOfClass:[NSArray class]]) {
 					int i;
@@ -912,10 +971,10 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 						if(![[t objectForKey:@"type_"] isEqualToString:@"track"]) continue; /* skip headings/index */
 						NSString *title = [t objectForKey:@"title"];
 						if(![title length]) continue;
-						NSString *artist = albumArtist;
+						NSString *trackArtist = dgAlbumArtist;
 						NSArray *ta = [t objectForKey:@"artists"];
-						if([ta isKindOfClass:[NSArray class]] && [ta count]) artist = [[ta objectAtIndex:0] objectForKey:@"name"];
-						[tracks addObject:[NSDictionary dictionaryWithObjectsAndKeys:title,@"title",(artist?artist:@""),@"artist",nil]];
+						if([ta isKindOfClass:[NSArray class]] && [ta count]) trackArtist = [[ta objectAtIndex:0] objectForKey:@"name"];
+						[tracks addObject:[NSDictionary dictionaryWithObjectsAndKeys:title,@"title",(trackArtist?trackArtist:@""),@"artist",nil]];
 					}
 				}
 			}
@@ -925,8 +984,8 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		NSMutableDictionary *info = [NSMutableDictionary dictionary];
 		[info setObject:urls forKey:@"images"];
 		[info setObject:tracks forKey:@"tracks"];
-		if([album length]) [info setObject:album forKey:@"album"];
-		if([albumArtist length]) [info setObject:albumArtist forKey:@"albumArtist"];
+		if([dgAlbum length]) [info setObject:dgAlbum forKey:@"album"];
+		if([dgAlbumArtist length]) [info setObject:dgAlbumArtist forKey:@"albumArtist"];
 		return info;
 	}
 
@@ -1009,7 +1068,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		int dgAttempt;
 		for(dgAttempt=0; dgAttempt<3 && ![[info objectForKey:@"images"] count] && ![cueParser coverData]; dgAttempt++) {
 			if(dgAttempt > 0) [NSThread sleepForTimeInterval:(NSTimeInterval)(dgAttempt*3)];
-			info = [self discogsReleaseInfoForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames]];
+			info = [self discogsReleaseInfoForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames] album:[cueParser title] artist:[cueParser artist]];
 		}
 		NSArray *urls = [info objectForKey:@"images"];
 		if([urls count]) {
