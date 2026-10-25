@@ -50,6 +50,7 @@ typedef enum
 	NSURL *coverURL;
 	BOOL ambiguous;
 	BOOL freeDBDisabled;
+	int lastMBReleaseStatus; /* HTTP status of the last MB release lookup: 200 = responded (no match is final), 503/429/-1/0 = throttled/non-response (worth waiting + retrying), -2 = not attempted */
 }
 
 - (id)initWithDelegate:(id)del;
@@ -68,6 +69,7 @@ typedef enum
 - (NSURL *)coverURL;
 - (NSURL *)musicBrainzCoverURL;
 - (NSString *)firstMusicBrainzReleaseID;
+- (int)lastMBReleaseStatus;
 - (BOOL)associateMBDiscID;
 - (void)disableFreeDB;
 

@@ -1163,37 +1163,67 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 {
 	/* Force every track of an optical disc to carry full MusicBrainz metadata
 	   before it is ripped, independent of the automatic-query service preference
-	   (which defaults to FreeDB). Idempotent per disc: a private marker on the
-	   first track keeps a re-rip from querying again. Runs synchronously on the
-	   calling thread (the util's network calls each have a 20s timeout) so the
-	   track metadata is fully populated before rip tasks are built. */
+	   (which defaults to FreeDB). Idempotent per disc (a private marker on the
+	   first track). Called on a BACKGROUND thread (applyMBThenResumeRip:), so it
+	   WAITS for MusicBrainz: complete metadata up front is worth more than ripping
+	   fast and re-tagging later. When MusicBrainz is merely throttled (503/429/
+	   timeout) it retries with escalating backoff until MB answers; it only stops
+	   and lets the lighter Discogs/CDDB names stand when MB genuinely has no match
+	   for the disc (an actual 200 with no release), the disc is removed, or the
+	   wait has gone on unreasonably long. */
 	NSArray *trackList = [cueParser trackList];
 	if(![trackList count]) return;
 	id firstMeta = [[trackList objectAtIndex:0] metadata];
 	if([firstMeta objectForKey:@"XLDMBTagged"]) return;
-	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
-	[u setPreferredService:XLDCDDBMusicBrainzPreferred];
-	[u setTracks:trackList totalFrame:(int)[cueParser totalFrames]];
-	NSString *releaseID = [u firstMusicBrainzReleaseID];
-	if(releaseID) {
-		forceFullMBTag = YES;
-		/* "MusicBrainz_fromURL" selects the ambiguous match path, so the release is
-		   accepted even when the disc has no registered MusicBrainz disc id (a fuzzy
-		   TOC match) — otherwise no medium matches and no track gets tagged. */
-		XLDCDDBResult r = [u readCDDBWithInfo:[NSArray arrayWithObjects:@"MusicBrainz_fromURL",@"",releaseID,nil]];
-		forceFullMBTag = NO;
-		/* Only mark the disc tagged once metadata actually landed (a release id on
-		   the first track), so a miss can be retried on a later rip. */
-		if(r == XLDCDDBSuccess && [firstMeta objectForKey:XLD_METADATA_MB_ALBUMID]) {
-			[firstMeta setObject:[NSNumber numberWithBool:YES] forKey:@"XLDMBTagged"];
-			if([self canSetCompilationFlag] && [cueParser isCompilation]) {
-				int i;
-				for(i=0;i<[trackList count];i++) [[[trackList objectAtIndex:i] metadata] setObject:[NSNumber numberWithBool:YES] forKey:XLD_METADATA_COMPILATION];
+
+	NSString *dev = [cueParser fileToDecode];
+	int attempt = 0;
+	while(1) {
+		/* Stop if the disc was ejected while we waited. */
+		if([dev hasPrefix:@"/dev/disk"] && ![[self insertedOpticalDevices] containsObject:dev]) return;
+
+		XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
+		[u setPreferredService:XLDCDDBMusicBrainzPreferred];
+		[u setTracks:trackList totalFrame:(int)[cueParser totalFrames]];
+		NSString *releaseID = [u firstMusicBrainzReleaseID];
+		int status = [u lastMBReleaseStatus];
+		BOOL throttled = NO;
+		if(releaseID) {
+			forceFullMBTag = YES;
+			/* "MusicBrainz_fromURL" selects the ambiguous match path, so the release is
+			   accepted even when the disc has no registered MusicBrainz disc id (a fuzzy
+			   TOC match) — otherwise no medium matches and no track gets tagged. */
+			XLDCDDBResult r = [u readCDDBWithInfo:[NSArray arrayWithObjects:@"MusicBrainz_fromURL",@"",releaseID,nil]];
+			forceFullMBTag = NO;
+			if(r == XLDCDDBSuccess && [firstMeta objectForKey:XLD_METADATA_MB_ALBUMID]) {
+				[firstMeta setObject:[NSNumber numberWithBool:YES] forKey:@"XLDMBTagged"];
+				if([self canSetCompilationFlag] && [cueParser isCompilation]) {
+					int i;
+					for(i=0;i<[trackList count];i++) [[[trackList objectAtIndex:i] metadata] setObject:[NSNumber numberWithBool:YES] forKey:XLD_METADATA_COMPILATION];
+				}
+				[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+				[u release];
+				return; /* got full MusicBrainz metadata */
 			}
-			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+			/* Found the release but the tag fetch came back empty — treat as throttled. */
+			throttled = YES;
 		}
+		else {
+			/* No release id: a real 200 (or no TOC to look up) is a genuine miss —
+			   let Discogs/CDDB names stand. Anything else is throttling/non-response. */
+			if(status == 200 || status == -2) { [u release]; return; }
+			throttled = YES;
+		}
+		[u release];
+		if(!throttled) return;
+
+		/* Wait for MusicBrainz to come back, with escalating backoff capped at 60s.
+		   Generous overall cap (~25 min) as a safety net so a rip can't hang forever
+		   if MB is down for the whole session; eject the disc to abort sooner. */
+		if(++attempt > 30) return;
+		NSTimeInterval backoff = 5.0 * attempt; if(backoff > 60.0) backoff = 60.0;
+		[NSThread sleepForTimeInterval:backoff];
 	}
-	[u release];
 }
 
 /* Background half of the Rip click: do the (network) MusicBrainz tagging off the

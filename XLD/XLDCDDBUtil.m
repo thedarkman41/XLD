@@ -629,30 +629,44 @@ end:
 	return coverURL;
 }
 
+- (int)lastMBReleaseStatus
+{
+	return lastMBReleaseStatus;
+}
+
 - (NSString *)firstMusicBrainzReleaseID
 {
 	/* A MusicBrainz release id for this disc: exact disc-id matches first, then
 	   a fuzzy TOC lookup (for discs with no registered disc id). */
+	lastMBReleaseStatus = -2; /* not attempted */
 	int i;
 	for(i=0;i<[queryResult count];i++) {
 		NSArray *row = [queryResult objectAtIndex:i];
-		if([row count] > 2 && [[row objectAtIndex:0] isEqualToString:@"MusicBrainz"]) return [row objectAtIndex:2];
+		if([row count] > 2 && [[row objectAtIndex:0] isEqualToString:@"MusicBrainz"]) { lastMBReleaseStatus = 200; return [row objectAtIndex:2]; }
 	}
 	if(strlen(toc) > 0) {
 		NSString *urlStr = [NSString stringWithFormat:@"https://musicbrainz.org/ws/2/discid/-?toc=%s&fmt=json", toc];
 		NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
 		[req setValue:[NSString stringWithFormat:@"XLD/%@ ( https://tmkk.undo.jp/xld/ )",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"]] forHTTPHeaderField:@"User-Agent"];
 		__block NSData *result = nil;
+		__block int httpStatus = 0;
 		dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-		NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err){ if(data) result = [data retain]; dispatch_semaphore_signal(sem); }];
+		NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err){
+			if([resp isKindOfClass:[NSHTTPURLResponse class]]) httpStatus = (int)[(NSHTTPURLResponse *)resp statusCode];
+			if(err) httpStatus = -1; /* network error / timeout */
+			if(data) result = [data retain];
+			dispatch_semaphore_signal(sem); }];
 		[task resume];
-		dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)20*NSEC_PER_SEC));
+		if(dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)20*NSEC_PER_SEC)) != 0) { [task cancel]; httpStatus = 0; /* timeout */ }
+		lastMBReleaseStatus = httpStatus;
 		if(result) {
 			id json = [NSJSONSerialization JSONObjectWithData:result options:0 error:nil];
 			[result release];
 			if([json isKindOfClass:[NSDictionary class]]) {
 				NSArray *rels = [json objectForKey:@"releases"];
 				if([rels isKindOfClass:[NSArray class]] && [rels count]) return [[rels objectAtIndex:0] objectForKey:@"id"];
+				/* A 200 with no releases is a real "not in MusicBrainz". */
+				if(httpStatus == 200 && [rels isKindOfClass:[NSArray class]]) lastMBReleaseStatus = 200;
 			}
 		}
 	}
