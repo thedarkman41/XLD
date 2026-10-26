@@ -831,18 +831,95 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return [self synchronousDataForRequest:req timeout:30.0];
 }
 
+/* The disc's per-track lengths in seconds (audio tracks only, in order), read from
+   the TOC. This is the one fully reliable fingerprint of a physical disc even when
+   its text metadata (titles) is wrong or missing, so it's what we verify a loose
+   name-search candidate against. */
+- (NSArray *)discTrackDurationsFromTrackList:(NSArray *)trackList
+{
+	NSMutableArray *secs = [NSMutableArray array];
+	int i;
+	for(i=0;i<[trackList count];i++) {
+		XLDTrack *tr = [trackList objectAtIndex:i];
+		if([[tr metadata] objectForKey:XLD_METADATA_DATATRACK]) continue; /* skip data track */
+		int s = 0;
+		if([tr frames] > 0) s = (int)(((double)[tr frames]/44100.0)+0.5);
+		else if([tr seconds] > 0) s = [tr seconds];
+		if(s > 0) [secs addObject:[NSNumber numberWithInt:s]];
+	}
+	return secs;
+}
+
+/* Do two ordered lists of per-track durations describe the same disc? Track count
+   must match (±1 for a trailing data/hidden track) and at least 80% of tracks must
+   line up within ±4s — enough to tell the right pressing from a same-size but
+   different compilation, which is exactly the wrong-release case we're guarding. */
+- (BOOL)durations:(NSArray *)a matchDurations:(NSArray *)b
+{
+	if(![a count] || ![b count]) return NO;
+	if(labs((long)[a count] - (long)[b count]) > 1) return NO;
+	NSUInteger n = ([a count] < [b count]) ? [a count] : [b count], i, match = 0;
+	for(i=0;i<n;i++) {
+		int x = [[a objectAtIndex:i] intValue], y = [[b objectAtIndex:i] intValue];
+		if(x > 0 && y > 0 && abs(x-y) <= 4) match++;
+	}
+	return (n > 0 && match*5 >= n*4);
+}
+
+/* Parse a Discogs "M:SS" (or "H:MM:SS") duration to seconds; 0 if blank/unparseable. */
+- (int)secondsFromDiscogsDuration:(NSString *)dur
+{
+	if(![dur isKindOfClass:[NSString class]] || ![dur length]) return 0;
+	NSArray *parts = [dur componentsSeparatedByString:@":"];
+	int total = 0, i;
+	for(i=0;i<[parts count];i++) {
+		NSString *p = [[parts objectAtIndex:i] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+		total = total*60 + [p intValue];
+	}
+	return total;
+}
+
 /* The Discogs release URL carried by a MusicBrainz release's url relations
-   (e.g. https://www.discogs.com/release/900490). nil if that release has none. */
-- (NSString *)discogsURLFromMBID:(NSString *)mbid
+   (e.g. https://www.discogs.com/release/900490). nil if that release has none.
+   When verifyTrackList is non-nil the release's own track lengths must match the
+   disc (on at least one medium, so a disc that is one CD of a multi-disc release
+   still verifies) before its Discogs link is trusted — this is what stops a loose
+   name-search from pulling a wrong release's artwork and track names. Pass nil to
+   skip verification for an authoritative disc-id/TOC match. */
+- (NSString *)discogsURLFromMBID:(NSString *)mbid verifyTrackList:(NSArray *)verifyTrackList
 {
 	if(![mbid length]) return nil;
-	NSMutableURLRequest *relReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://musicbrainz.org/ws/2/release/%@?inc=url-rels&fmt=json",mbid]]];
+	NSString *inc = verifyTrackList ? @"url-rels+recordings" : @"url-rels";
+	NSMutableURLRequest *relReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://musicbrainz.org/ws/2/release/%@?inc=%@&fmt=json",mbid,inc]]];
 	[relReq setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
 	[relReq setTimeoutInterval:20.0];
 	NSData *relData = [self synchronousDataForRequest:relReq timeout:20.0];
 	if(!relData) return nil;
 	id relJson = [NSJSONSerialization JSONObjectWithData:relData options:0 error:nil];
 	if(![relJson isKindOfClass:[NSDictionary class]]) return nil;
+
+	if(verifyTrackList) {
+		NSArray *discSecs = [self discTrackDurationsFromTrackList:verifyTrackList];
+		NSArray *media = [relJson objectForKey:@"media"];
+		BOOL verified = NO;
+		if([discSecs count] && [media isKindOfClass:[NSArray class]]) {
+			int m;
+			for(m=0;m<[media count] && !verified;m++) {
+				NSArray *mtracks = [[media objectAtIndex:m] objectForKey:@"tracks"];
+				if(![mtracks isKindOfClass:[NSArray class]]) continue;
+				NSMutableArray *relSecs = [NSMutableArray array];
+				int t;
+				for(t=0;t<[mtracks count];t++) {
+					id len = [[mtracks objectAtIndex:t] objectForKey:@"length"];
+					int s = ([len respondsToSelector:@selector(intValue)]) ? ([len intValue]/1000) : 0;
+					[relSecs addObject:[NSNumber numberWithInt:s]];
+				}
+				if([self durations:relSecs matchDurations:discSecs]) verified = YES;
+			}
+		}
+		if(!verified) return nil; /* wrong release — leave it alone rather than tag wrongly */
+	}
+
 	NSArray *rels = [relJson objectForKey:@"relations"];
 	if(![rels isKindOfClass:[NSArray class]]) return nil;
 	int i;
@@ -869,7 +946,8 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	[u setTracks:trackList totalFrame:totalFrame];
 	NSString *mbid = [u firstMusicBrainzReleaseID];
 	[u release];
-	NSString *dg = [self discogsURLFromMBID:mbid];
+	/* disc-id/TOC match is the actual disc — trust it without duration checks. */
+	NSString *dg = [self discogsURLFromMBID:mbid verifyTrackList:nil];
 	if([dg length]) return dg;
 
 	/* 2) MusicBrainz release search by album + artist. The album/artist are the
@@ -913,7 +991,8 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	for(i=0;i<[candidates count] && checked < 6;i++) {
 		if(mbid && [[candidates objectAtIndex:i] isEqualToString:mbid]) continue; /* already tried */
 		checked++;
-		NSString *cdg = [self discogsURLFromMBID:[candidates objectAtIndex:i]];
+		/* loose name-search match — require its track lengths to match the disc. */
+		NSString *cdg = [self discogsURLFromMBID:[candidates objectAtIndex:i] verifyTrackList:trackList];
 		if([cdg length]) return cdg;
 	}
 	return nil;
@@ -974,7 +1053,9 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 						NSString *trackArtist = dgAlbumArtist;
 						NSArray *ta = [t objectForKey:@"artists"];
 						if([ta isKindOfClass:[NSArray class]] && [ta count]) trackArtist = [[ta objectAtIndex:0] objectForKey:@"name"];
-						[tracks addObject:[NSDictionary dictionaryWithObjectsAndKeys:title,@"title",(trackArtist?trackArtist:@""),@"artist",nil]];
+						NSString *pos = [t objectForKey:@"position"]; if(![pos isKindOfClass:[NSString class]]) pos = @"";
+						NSString *dur = [t objectForKey:@"duration"]; if(![dur isKindOfClass:[NSString class]]) dur = @"";
+						[tracks addObject:[NSDictionary dictionaryWithObjectsAndKeys:title,@"title",(trackArtist?trackArtist:@""),@"artist",pos,@"position",dur,@"duration",nil]];
 					}
 				}
 			}
@@ -1106,9 +1187,56 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	NSArray *dgTracks = [info objectForKey:@"tracks"];
 	NSArray *trackList = [cueParser trackList];
 	if(![dgTracks count] || ![trackList count]) return;
-	/* Map Discogs audio tracks to the disc's audio tracks in order. */
-	int ti = 0, di = 0, changed = 0;
-	int tn = (int)[trackList count], dn = (int)[dgTracks count];
+
+	/* The disc's own audio-track durations (reliable TOC fingerprint). */
+	NSArray *discSecs = [self discTrackDurationsFromTrackList:trackList];
+	int audioCount = (int)[discSecs count];
+
+	/* The Discogs release may be a multi-disc set (e.g. this disc is "[Disc 2]" of
+	   a 2-CD release), in which case its tracklist carries BOTH discs' tracks and a
+	   naive fill from index 0 would stamp disc 1's names onto disc 2. Find where this
+	   physical disc's run begins inside the Discogs tracklist before filling. */
+	int startOffset = 0, dn = (int)[dgTracks count];
+	if(dn > audioCount && audioCount > 0) {
+		/* a) Align by duration: slide a window of audioCount and pick the offset
+		   whose Discogs durations best match the disc (within +/-4s). */
+		int bestOff = -1, bestMatch = -1, off;
+		for(off=0; off+audioCount<=dn; off++) {
+			int m, match = 0, usable = 0;
+			for(m=0;m<audioCount;m++) {
+				int ds = [[discSecs objectAtIndex:m] intValue];
+				int gs = [self secondsFromDiscogsDuration:[[dgTracks objectAtIndex:off+m] objectForKey:@"duration"]];
+				if(gs > 0) { usable++; if(ds>0 && abs(ds-gs)<=4) match++; }
+			}
+			if(usable*2 >= audioCount && match > bestMatch) { bestMatch = match; bestOff = off; }
+		}
+		if(bestOff >= 0 && bestMatch*5 >= audioCount*4) startOffset = bestOff;
+		else {
+			/* b) No usable durations: group by the disc prefix in the Discogs
+			   position ("2-5" -> disc "2") and take the group whose size matches. */
+			NSString *wantPrefix = nil; int runStart = 0, i;
+			NSString *curPrefix = nil; int curStart = 0, curLen = 0;
+			for(i=0;i<=dn;i++) {
+				NSString *p = nil;
+				if(i < dn) {
+					NSString *pos = [[dgTracks objectAtIndex:i] objectForKey:@"position"];
+					NSRange dash = [pos rangeOfString:@"-"];
+					if(dash.location != NSNotFound) p = [pos substringToIndex:dash.location];
+					else p = @"";
+				}
+				if(i == dn || ![p isEqualToString:(curPrefix?curPrefix:@"")]) {
+					if(curLen == audioCount && !wantPrefix) { wantPrefix = curPrefix?curPrefix:@""; runStart = curStart; }
+					curPrefix = p; curStart = i; curLen = 1;
+				} else curLen++;
+			}
+			if(wantPrefix) startOffset = runStart;
+		}
+	}
+
+	/* Map Discogs audio tracks (from the chosen disc's run) to the disc's audio
+	   tracks in order. */
+	int ti = 0, di = startOffset, changed = 0;
+	int tn = (int)[trackList count];
 	while(ti < tn && di < dn) {
 		XLDTrack *tr = [trackList objectAtIndex:ti];
 		/* Skip non-audio (data) tracks on the disc side. */
@@ -1198,23 +1326,73 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	   query), retry a few times with backoff, non-blocking between attempts — the
 	   cover uses a lighter path and may already have succeeded on its own. */
 	NSArray *trackList = [cueParser trackList];
-	if(![trackList count] || [[[trackList objectAtIndex:0] metadata] objectForKey:XLD_METADATA_TITLE]) return;
+	if(![trackList count]) return;
+	id firstMeta = [[trackList objectAtIndex:0] metadata];
+	NSString *albumArtist = [firstMeta objectForKey:XLD_METADATA_ALBUMARTIST];
+	/* There is work to do when the track titles are missing, OR when this is a
+	   various-artists disc whose per-track artists are still placeholders — empty, or
+	   just the album's "Various Artists" (which FreeDB/CD-Text leaves on every track of
+	   a compilation). In the latter case the names can already be present (so the old
+	   "title exists -> return" guard skipped the real per-track credits entirely). */
+	BOOL needTitles = ![firstMeta objectForKey:XLD_METADATA_TITLE];
+	BOOL needArtists = NO;
+	int ti;
+	for(ti=0;ti<[trackList count];ti++) {
+		id m = [[trackList objectAtIndex:ti] metadata];
+		if([m objectForKey:XLD_METADATA_DATATRACK]) continue;
+		NSString *a = [m objectForKey:XLD_METADATA_ARTIST];
+		if(![a length] || (albumArtist && [a isEqualToString:albumArtist])
+		   || [a caseInsensitiveCompare:@"Various Artists"] == NSOrderedSame) { needArtists = YES; break; }
+	}
+	if(!needTitles && !needArtists) return;
+	/* Stop if an optical disc was ejected while we were between retries. */
+	NSString *dev = [cueParser fileToDecode];
+	if([dev hasPrefix:@"/dev/disk"] && ![[self insertedOpticalDevices] containsObject:dev]) return;
 	XLDCDDBUtil *u = [[XLDCDDBUtil alloc] initWithDelegate:self];
 	[u setPreferredService:XLDCDDBMusicBrainzPreferred];
 	[u setTracks:trackList totalFrame:(int)[cueParser totalFrames]];
 	NSString *releaseID = [u firstMusicBrainzReleaseID];
-	BOOL ok = NO;
+	int status = [u lastMBReleaseStatus];
+	BOOL ok = NO, genuineMiss = NO;
 	if(releaseID) {
+		/* Clear placeholder per-track artists (empty is already fillable; an artist
+		   equal to the "Various Artists" album credit is not a real credit) so the
+		   fill-only pass writes MusicBrainz's real per-track artist instead of leaving
+		   the placeholder. Genuine per-track artists (anything else) are left as-is. */
+		int i;
+		for(i=0;i<[trackList count];i++) {
+			id m = [[trackList objectAtIndex:i] metadata];
+			if([m objectForKey:XLD_METADATA_DATATRACK]) continue;
+			NSString *a = [m objectForKey:XLD_METADATA_ARTIST];
+			if(![a length]) continue;
+			if((albumArtist && [a isEqualToString:albumArtist])
+			   || [a caseInsensitiveCompare:@"Various Artists"] == NSOrderedSame)
+				[m removeObjectForKey:XLD_METADATA_ARTIST];
+		}
 		fillMBText = YES;
 		XLDCDDBResult r = [u readCDDBWithInfo:[NSArray arrayWithObjects:@"MusicBrainz_fromURL",@"",releaseID,nil]];
 		fillMBText = NO;
 		if(r == XLDCDDBSuccess) { [discView reloadData]; ok = YES; }
+		/* Found the release but the detail fetch came back empty — MusicBrainz is
+		   almost certainly throttling (503/429) after a burst of lookups; retry. */
+	}
+	else {
+		/* No release id: a real 200 (MB genuinely has no match) or no TOC to look up
+		   is a true miss — stop and let the CDDB/Discogs names stand. Anything else
+		   (503/429/timeout/connection error) is throttling, so keep trying. */
+		if(status == 200 || status == -2) genuineMiss = YES;
 	}
 	[u release];
-	if(!ok && attempt < 4) {
+	/* Match the cover fetch's persistence: MusicBrainz throttles hard when several
+	   discs are looked up right after a few rips, and 4 quick tries used to give up
+	   while the disc still had a (lighter-path) cover but no track names. Retry
+	   patiently with escalating backoff, non-blocking on the main run loop so the UI
+	   stays responsive, until MB answers or we hit the safety cap. */
+	if(!ok && !genuineMiss && attempt < 15) {
+		NSTimeInterval backoff = 5.0 * (attempt + 1); if(backoff > 45.0) backoff = 45.0;
 		[self performSelector:@selector(fillMusicBrainzTextRetry:)
 				   withObject:[NSArray arrayWithObjects:cueParser, [NSNumber numberWithInt:attempt+1], nil]
-				   afterDelay:(2.0 + attempt*2.0)];
+				   afterDelay:backoff];
 	}
 }
 

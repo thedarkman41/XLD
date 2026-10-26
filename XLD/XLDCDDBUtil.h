@@ -68,6 +68,8 @@ typedef enum
 - (NSString *)asin;
 - (NSURL *)coverURL;
 - (NSURL *)musicBrainzCoverURL;
+- (NSArray *)discAudioDurations;
+- (BOOL)mbRelease:(NSDictionary *)rel matchesDurations:(NSArray *)discSecs;
 - (NSString *)firstMusicBrainzReleaseID;
 - (int)lastMBReleaseStatus;
 - (BOOL)associateMBDiscID;

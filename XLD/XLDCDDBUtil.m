@@ -645,7 +645,11 @@ end:
 		if([row count] > 2 && [[row objectAtIndex:0] isEqualToString:@"MusicBrainz"]) { lastMBReleaseStatus = 200; return [row objectAtIndex:2]; }
 	}
 	if(strlen(toc) > 0) {
-		NSString *urlStr = [NSString stringWithFormat:@"https://musicbrainz.org/ws/2/discid/-?toc=%s&fmt=json", toc];
+		/* inc=recordings + duration verification: the fuzzy TOC matcher returns
+		   unrelated same-length compilations, so return only a release whose track
+		   lengths actually match this disc rather than blindly the first row. */
+		NSArray *discSecs = [self discAudioDurations];
+		NSString *urlStr = [NSString stringWithFormat:@"https://musicbrainz.org/ws/2/discid/-?toc=%s&fmt=json&inc=recordings", toc];
 		NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
 		[req setValue:[NSString stringWithFormat:@"XLD/%@ ( https://tmkk.undo.jp/xld/ )",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"]] forHTTPHeaderField:@"User-Agent"];
 		__block NSData *result = nil;
@@ -664,13 +668,63 @@ end:
 			[result release];
 			if([json isKindOfClass:[NSDictionary class]]) {
 				NSArray *rels = [json objectForKey:@"releases"];
-				if([rels isKindOfClass:[NSArray class]] && [rels count]) return [[rels objectAtIndex:0] objectForKey:@"id"];
-				/* A 200 with no releases is a real "not in MusicBrainz". */
-				if(httpStatus == 200 && [rels isKindOfClass:[NSArray class]]) lastMBReleaseStatus = 200;
+				if([rels isKindOfClass:[NSArray class]]) {
+					/* A 200 that reached MusicBrainz is a real answer (match or not),
+					   so callers that wait-and-retry on throttling can stop. */
+					if(httpStatus == 200) lastMBReleaseStatus = 200;
+					for(i=0;i<[rels count];i++) {
+						if([self mbRelease:[rels objectAtIndex:i] matchesDurations:discSecs])
+							return [[rels objectAtIndex:i] objectForKey:@"id"];
+					}
+				}
 			}
 		}
 	}
 	return nil;
+}
+
+/* This disc's per-track lengths in seconds (audio tracks only, in order), from the
+   TOC. The one reliable fingerprint of the physical disc, used to reject a fuzzy
+   TOC match that is a different album with a coincidentally similar track layout. */
+- (NSArray *)discAudioDurations
+{
+	NSMutableArray *secs = [NSMutableArray array];
+	int i;
+	for(i=0;i<[trackArr count];i++) {
+		XLDTrack *tr = [trackArr objectAtIndex:i];
+		if([[tr metadata] objectForKey:XLD_METADATA_DATATRACK]) continue;
+		int s = 0;
+		if([tr frames] > 0) s = (int)(((double)[tr frames]/44100.0)+0.5);
+		else if([tr seconds] > 0) s = [tr seconds];
+		if(s > 0) [secs addObject:[NSNumber numberWithInt:s]];
+	}
+	return secs;
+}
+
+/* Does a MusicBrainz release (with inc=recordings) have a medium whose track
+   lengths match this disc? Track count within +/-1 and at least 80% of tracks
+   within +/-4s — tight enough to tell the right release from a same-length
+   compilation that MusicBrainz's fuzzy TOC matcher let through. */
+- (BOOL)mbRelease:(NSDictionary *)rel matchesDurations:(NSArray *)discSecs
+{
+	if(![discSecs count]) return NO;
+	NSArray *media = [rel objectForKey:@"media"];
+	if(![media isKindOfClass:[NSArray class]]) return NO;
+	int m;
+	for(m=0;m<[media count];m++) {
+		NSArray *tracks = [[media objectAtIndex:m] objectForKey:@"tracks"];
+		if(![tracks isKindOfClass:[NSArray class]]) continue;
+		if(labs((long)[tracks count] - (long)[discSecs count]) > 1) continue;
+		NSUInteger n = ([tracks count] < [discSecs count]) ? [tracks count] : [discSecs count], t, match = 0;
+		for(t=0;t<n;t++) {
+			id len = [[tracks objectAtIndex:t] objectForKey:@"length"];
+			int gs = [len respondsToSelector:@selector(intValue)] ? ([len intValue]/1000) : 0;
+			int ds = [[discSecs objectAtIndex:t] intValue];
+			if(gs > 0 && ds > 0 && abs(gs-ds) <= 4) match++;
+		}
+		if(n > 0 && match*5 >= n*4) return YES;
+	}
+	return NO;
 }
 
 - (NSURL *)musicBrainzCoverURL
@@ -691,7 +745,11 @@ end:
 	   track layout even though no exact disc id is registered for it, so the
 	   disc-id query above returns nothing. */
 	if(strlen(toc) > 0) {
-		NSString *urlStr = [NSString stringWithFormat:@"https://musicbrainz.org/ws/2/discid/-?toc=%s&fmt=json", toc];
+		/* inc=recordings so each candidate carries its track lengths; the fuzzy TOC
+		   matcher is loose enough to return unrelated same-length compilations, so we
+		   only trust a release whose track lengths actually match this disc. */
+		NSArray *discSecs = [self discAudioDurations];
+		NSString *urlStr = [NSString stringWithFormat:@"https://musicbrainz.org/ws/2/discid/-?toc=%s&fmt=json&inc=recordings", toc];
 		NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
 		[req setValue:[NSString stringWithFormat:@"XLD/%@ ( https://tmkk.undo.jp/xld/ )",[[[NSBundle mainBundle] infoDictionary] valueForKey:@"CFBundleVersion"]] forHTTPHeaderField:@"User-Agent"];
 		__block NSData *result = nil;
@@ -706,8 +764,9 @@ end:
 				NSArray *rels = [json objectForKey:@"releases"];
 				if([rels isKindOfClass:[NSArray class]]) {
 					for(i=0;i<[rels count];i++) {
-						NSString *rid = [[rels objectAtIndex:i] objectForKey:@"id"];
-						NSURL *u = [XLDMusicBrainzRelease coverURLFromReleaseID:rid];
+						NSDictionary *rel = [rels objectAtIndex:i];
+						if(![self mbRelease:rel matchesDurations:discSecs]) continue; /* wrong album */
+						NSURL *u = [XLDMusicBrainzRelease coverURLFromReleaseID:[rel objectForKey:@"id"]];
 						if(u) return u;
 					}
 				}
