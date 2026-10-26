@@ -702,7 +702,10 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			[self performSelectorOnMainThread:@selector(beginDecode:) withObject:nil waitUntilDone:NO];
 		}
 		else {
-			NSBeginInformationalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB not found"));
+			/* Only nag about a CDDB miss when the user explicitly asked (manual Get
+			   Tracks). On an automatic insert this fires even though the MusicBrainz
+			   text fill above usually populated the disc, so it is pure noise. */
+			if(manualQuery) NSBeginInformationalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB not found"));
 			/* Use MusicBrainz (Cover Art Archive) artwork, not Amazon. Fall back
 			   to a MusicBrainz release match even when the text metadata came
 			   from FreeDB/CDDB. */
@@ -727,7 +730,10 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			[self performSelectorOnMainThread:@selector(beginDecode:) withObject:nil waitUntilDone:NO];
 		}
 		else {
-			NSBeginCriticalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB connection failure"));
+			/* Same as above: a connection failure on an automatic insert shouldn't
+			   throw a modal — the MusicBrainz fill retries on its own. Only surface
+			   it for a manual lookup the user initiated. */
+			if(manualQuery) NSBeginCriticalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB connection failure"));
 			/* Use MusicBrainz (Cover Art Archive) artwork, not Amazon. Fall back
 			   to a MusicBrainz release match even when the text metadata came
 			   from FreeDB/CDDB. */
@@ -768,7 +774,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 				if(!art) art = [util musicBrainzCoverURL];
 				if(art) [[discView imageView] loadImageFromURL:art];
 			}
-			if(result != XLDCDDBSuccess) {
+			if(result != XLDCDDBSuccess && manualQuery) {
 				NSBeginCriticalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB connection failure"));
 			}
 		}
