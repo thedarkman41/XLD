@@ -710,9 +710,17 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			   to a MusicBrainz release match even when the text metadata came
 			   from FreeDB/CDDB. */
 			{
-				NSURL *art = [util coverURL];
-				if(!art) art = [util musicBrainzCoverURL];
-				if(art) [[discView imageView] loadImageFromURL:art];
+				/* Optical discs get their cover from fetchMusicBrainzCoverInBackground,
+				   bound to THIS cueParser. Loading into the shared image view here is
+				   async and its completion writes to whatever disc is selected when it
+				   arrives — so one disc's art lands on another when several scan at once
+				   (SourceForge-style race). Use the shared-view loader only for file
+				   discs, which have no per-parser background cover fetch. */
+				if(![[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) {
+					NSURL *art = [util coverURL];
+					if(!art) art = [util musicBrainzCoverURL];
+					if(art) [[discView imageView] loadImageFromURL:art];
+				}
 			}
 		}
 		[util release];
@@ -738,9 +746,17 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			   to a MusicBrainz release match even when the text metadata came
 			   from FreeDB/CDDB. */
 			{
-				NSURL *art = [util coverURL];
-				if(!art) art = [util musicBrainzCoverURL];
-				if(art) [[discView imageView] loadImageFromURL:art];
+				/* Optical discs get their cover from fetchMusicBrainzCoverInBackground,
+				   bound to THIS cueParser. Loading into the shared image view here is
+				   async and its completion writes to whatever disc is selected when it
+				   arrives — so one disc's art lands on another when several scan at once
+				   (SourceForge-style race). Use the shared-view loader only for file
+				   discs, which have no per-parser background cover fetch. */
+				if(![[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) {
+					NSURL *art = [util coverURL];
+					if(!art) art = [util musicBrainzCoverURL];
+					if(art) [[discView imageView] loadImageFromURL:art];
+				}
 			}
 		}
 		[util release];
@@ -770,9 +786,17 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			   to a MusicBrainz release match even when the text metadata came
 			   from FreeDB/CDDB. */
 			{
-				NSURL *art = [util coverURL];
-				if(!art) art = [util musicBrainzCoverURL];
-				if(art) [[discView imageView] loadImageFromURL:art];
+				/* Optical discs get their cover from fetchMusicBrainzCoverInBackground,
+				   bound to THIS cueParser. Loading into the shared image view here is
+				   async and its completion writes to whatever disc is selected when it
+				   arrives — so one disc's art lands on another when several scan at once
+				   (SourceForge-style race). Use the shared-view loader only for file
+				   discs, which have no per-parser background cover fetch. */
+				if(![[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) {
+					NSURL *art = [util coverURL];
+					if(!art) art = [util musicBrainzCoverURL];
+					if(art) [[discView imageView] loadImageFromURL:art];
+				}
 			}
 			if(result != XLDCDDBSuccess && manualQuery) {
 				NSBeginCriticalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB connection failure"));
@@ -5663,9 +5687,17 @@ end:
 			   to a MusicBrainz release match even when the text metadata came
 			   from FreeDB/CDDB. */
 			{
-				NSURL *art = [util coverURL];
-				if(!art) art = [util musicBrainzCoverURL];
-				if(art) [[discView imageView] loadImageFromURL:art];
+				/* Optical discs get their cover from fetchMusicBrainzCoverInBackground,
+				   bound to THIS cueParser. Loading into the shared image view here is
+				   async and its completion writes to whatever disc is selected when it
+				   arrives — so one disc's art lands on another when several scan at once
+				   (SourceForge-style race). Use the shared-view loader only for file
+				   discs, which have no per-parser background cover fetch. */
+				if(![[cueParser fileToDecode] hasPrefix:@"/dev/disk"]) {
+					NSURL *art = [util coverURL];
+					if(!art) art = [util musicBrainzCoverURL];
+					if(art) [[discView imageView] loadImageFromURL:art];
+				}
 			}
 			if(result != XLDCDDBSuccess) {
 				NSBeginCriticalAlertSheet(LS(@"CDDB connection"), @"OK", nil, nil, [discView window], nil, nil, nil, NULL, LS(@"CDDB connection failure"));
