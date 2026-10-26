@@ -1,2 +1,0 @@
-Target dependency graph (1 target)
-Target 'XLDVorbisOutput' in project 'XLDVorbisOutput_export' (no dependencies)

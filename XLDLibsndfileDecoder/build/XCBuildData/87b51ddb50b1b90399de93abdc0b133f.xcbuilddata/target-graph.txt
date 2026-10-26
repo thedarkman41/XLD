@@ -1,2 +1,0 @@
-Target dependency graph (1 target)
-Target 'XLDLibsndfileDecoder' in project 'XLDLibsndfileDecoder_export' (no dependencies)
