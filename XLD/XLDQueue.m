@@ -316,6 +316,22 @@ extern int XLDDarkModeSupportEnabled;
 	//[lock unlock];
 }
 
+/* Stop just the rip of one optical drive: cancel every task (running or waiting)
+   whose atomicKey is that device. Like Cancel All Tasks, stopConvert: aborts the
+   active track and marks the waiting ones cancelled, so convertFinished: drops
+   their rows (the disc's unfinished tracks leave the queue) and frees the drive. */
+- (void)cancelTasksForDevice:(NSString *)dev
+{
+	if(![dev length]) return;
+	int i;
+	for(i=[taskArr count]-1;i>=0;i--) {
+		id task = [taskArr objectAtIndex:i];
+		NSString *k = [task atomicKey];
+		if(k && [k isEqualToString:dev]) [task stopConvert:nil];
+	}
+	[o_tableView reloadData];
+}
+
 /* Reposition every progress row to its slot. Animated gives the slide-up when a
    row above it is removed; the rows are manual subviews over an empty cell-based
    table, so they are moved by frame rather than by the table itself. */

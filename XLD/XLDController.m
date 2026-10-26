@@ -5244,6 +5244,16 @@ end:
 	return [taskQueue isDeviceBusy:dev];
 }
 
+- (void)stopRipByDevice:(NSString *)dev
+{
+	/* Stop the rip of one disc (the per-row Stop glyph): cancel its tasks, which
+	   drops its unfinished tracks from the queue and frees the drive. The eject/stop
+	   glyph flips back to eject via queueBusyDevicesChanged when the drive clears. */
+	if(![dev length]) return;
+	[taskQueue cancelTasksForDevice:dev];
+	if([discView respondsToSelector:@selector(layoutEjectButtons)]) [discView layoutEjectButtons];
+}
+
 - (void)queueBusyDevicesChanged
 {
 	/* A drive started ripping: make the disc view sweep its busy rows. */
@@ -5252,6 +5262,9 @@ end:
 	/* The Queue toolbar glyph is live only while something is ripping. */
 	if([discView respondsToSelector:@selector(setQueueButtonEnabled:)])
 		[discView setQueueButtonEnabled:[taskQueue hasActiveTask]];
+	/* Flip each disc's eject glyph to a Stop glyph while its drive rips, and back. */
+	if([discView respondsToSelector:@selector(layoutEjectButtons)])
+		[discView layoutEjectButtons];
 }
 
 /* Open the progress window on demand (it no longer pops up by itself). */

@@ -447,16 +447,20 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 		[btn setButtonType:NSMomentaryChangeButton];
 		[btn setBordered:NO];
 		[[btn cell] setImagePosition:NSNoImage];
-		/* Visible eject glyph in the right-hand gutter (pill stops short of it);
-		   device path carried in the identifier for the action. */
+		/* While this disc is ripping the control becomes a red Stop glyph that aborts
+		   the rip (and drops its unfinished tracks from the queue); otherwise it is the
+		   normal eject glyph. Device path carried in the identifier for the action. */
+		BOOL ripping = ([delegate respondsToSelector:@selector(isDeviceRipping:)] && [delegate isDeviceRipping:dev]);
+		NSString *glyph = ripping ? @"⏹" : @"⏏";
+		NSColor *glyphColor = ripping ? [NSColor systemRedColor] : [NSColor secondaryLabelColor];
 		NSDictionary *attrs = [NSDictionary dictionaryWithObjectsAndKeys:
-			[NSColor secondaryLabelColor], NSForegroundColorAttributeName,
+			glyphColor, NSForegroundColorAttributeName,
 			[NSFont systemFontOfSize:13], NSFontAttributeName, nil];
-		[btn setAttributedTitle:[[[NSAttributedString alloc] initWithString:@"⏏" attributes:attrs] autorelease]];
+		[btn setAttributedTitle:[[[NSAttributedString alloc] initWithString:glyph attributes:attrs] autorelease]];
 		[btn setIdentifier:dev];
-		[btn setToolTip:LS(@"Eject")];
+		[btn setToolTip:ripping ? LS(@"Stop") : LS(@"Eject")];
 		[btn setTarget:self];
-		[btn setAction:@selector(ejectDiscClicked:)];
+		[btn setAction:ripping ? @selector(stopRipClicked:) : @selector(ejectDiscClicked:)];
 		[btn setAutoresizingMask:NSViewMinXMargin];
 		[o_selectorTable addSubview:btn positioned:NSWindowAbove relativeTo:nil];
 		[ejectButtons addObject:btn];
@@ -468,6 +472,15 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 {
 	if([delegate respondsToSelector:@selector(ejectDiscByDevice:)])
 		[delegate ejectDiscByDevice:[sender identifier]];
+}
+
+/* The Stop glyph (shown in place of eject while this disc rips): abort the rip and
+   drop its unfinished tracks from the queue. The glyph flips back to eject when the
+   queue reports the drive no longer busy (queueBusyDevicesChanged -> relayout). */
+- (IBAction)stopRipClicked:(id)sender
+{
+	if([delegate respondsToSelector:@selector(stopRipByDevice:)])
+		[delegate stopRipByDevice:[sender identifier]];
 }
 
 /* --- Async disc scanning: show the disc immediately, with scan progress in its

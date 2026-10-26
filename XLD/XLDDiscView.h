@@ -62,6 +62,7 @@
 - (void)openCueParser:(id)parser;
 - (void)reloadData;
 - (void)startCylonAnimation;
+- (void)layoutEjectButtons;
 - (void)setQueueButtonEnabled:(BOOL)enabled;
 - (void)applyAccentColor;
 - (void)setDevice:(NSString *)dev preparing:(BOOL)flag;

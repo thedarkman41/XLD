@@ -251,3 +251,4 @@
 - (NSString *)currentOutputFormatTitle;
 - (void)selectOutputFormatWithTitle:(NSString *)title;
 @end
+- (void)stopRipByDevice:(NSString *)dev;
