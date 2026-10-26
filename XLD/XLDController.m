@@ -1028,6 +1028,174 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return nil;
 }
 
+/* The user's optional Discogs personal access token (Preferences > CDDB). When
+   present the direct Discogs search uses the authenticated API; otherwise it falls
+   back to scraping the search page through FlareSolverr. nil when unset/blank. */
+- (NSString *)discogsToken
+{
+	NSString *t = o_discogsToken ? [o_discogsToken stringValue] : [[NSUserDefaults standardUserDefaults] stringForKey:@"DiscogsToken"];
+	t = [t stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	return [t length] ? t : nil;
+}
+
+- (IBAction)discogsTokenChanged:(id)sender
+{
+	NSString *t = [[o_discogsToken stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	[[NSUserDefaults standardUserDefaults] setObject:(t?t:@"") forKey:@"DiscogsToken"];
+}
+
+/* Images + tracklist for one Discogs release id, from the (token-free) release API.
+   Each track carries title/artist/position/duration so callers can verify and fill. */
+- (NSDictionary *)discogsInfoFromReleaseID:(NSString *)releaseID
+{
+	if(![releaseID length]) return nil;
+	NSString *token = [self discogsToken];
+	NSString *urlStr = [token length]
+		? [NSString stringWithFormat:@"https://api.discogs.com/releases/%@?token=%@",releaseID,token]
+		: [NSString stringWithFormat:@"https://api.discogs.com/releases/%@",releaseID];
+	NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+	[apiReq setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
+	[apiReq setTimeoutInterval:20.0];
+	NSData *apiData = [self synchronousDataForRequest:apiReq timeout:20.0];
+	if(!apiData) return nil;
+	id apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
+	if(![apiJson isKindOfClass:[NSDictionary class]]) return nil;
+	NSMutableArray *urls = [NSMutableArray array];
+	NSMutableArray *tracks = [NSMutableArray array];
+	NSString *dgAlbum = [apiJson objectForKey:@"title"], *dgAlbumArtist = nil;
+	NSArray *images = [apiJson objectForKey:@"images"];
+	if([images isKindOfClass:[NSArray class]]) {
+		int i; for(i=0;i<[images count];i++){ NSString *uri=[[images objectAtIndex:i] objectForKey:@"uri"]; if([uri length]) [urls addObject:uri]; }
+	}
+	NSArray *aa = [apiJson objectForKey:@"artists"];
+	if([aa isKindOfClass:[NSArray class]] && [aa count]) dgAlbumArtist = [[aa objectAtIndex:0] objectForKey:@"name"];
+	NSArray *tl = [apiJson objectForKey:@"tracklist"];
+	if([tl isKindOfClass:[NSArray class]]) {
+		int i;
+		for(i=0;i<[tl count];i++) {
+			NSDictionary *t = [tl objectAtIndex:i];
+			if(![[t objectForKey:@"type_"] isEqualToString:@"track"]) continue;
+			NSString *title = [t objectForKey:@"title"];
+			if(![title length]) continue;
+			NSString *trackArtist = dgAlbumArtist;
+			NSArray *ta = [t objectForKey:@"artists"];
+			if([ta isKindOfClass:[NSArray class]] && [ta count]) trackArtist = [[ta objectAtIndex:0] objectForKey:@"name"];
+			NSString *pos = [t objectForKey:@"position"]; if(![pos isKindOfClass:[NSString class]]) pos=@"";
+			NSString *dur = [t objectForKey:@"duration"]; if(![dur isKindOfClass:[NSString class]]) dur=@"";
+			[tracks addObject:[NSDictionary dictionaryWithObjectsAndKeys:title,@"title",(trackArtist?trackArtist:@""),@"artist",pos,@"position",dur,@"duration",nil]];
+		}
+	}
+	if(![urls count] && ![tracks count]) return nil;
+	NSMutableDictionary *info = [NSMutableDictionary dictionary];
+	[info setObject:urls forKey:@"images"];
+	[info setObject:tracks forKey:@"tracks"];
+	if([dgAlbum length]) [info setObject:dgAlbum forKey:@"album"];
+	if([dgAlbumArtist length]) [info setObject:dgAlbumArtist forKey:@"albumArtist"];
+	return info;
+}
+
+/* Does a Discogs release (its info dict) actually describe this disc? Audio-track
+   count must line up (allow one trailing data/hidden track) and, when Discogs
+   carries durations for most tracks, those durations must match the disc's TOC —
+   the signal that separates the right release from a same-size different comp. */
+- (BOOL)discogsInfo:(NSDictionary *)info matchesTrackList:(NSArray *)trackList
+{
+	NSArray *dgTracks = [info objectForKey:@"tracks"];
+	NSArray *discSecs = [self discTrackDurationsFromTrackList:trackList];
+	int audioN = (int)[discSecs count];
+	if(audioN <= 0 || ![dgTracks count]) return NO;
+	if(labs((long)[dgTracks count] - (long)audioN) > 1) return NO;
+	NSMutableArray *dgSecs = [NSMutableArray array];
+	int i, withDur = 0;
+	for(i=0;i<[dgTracks count];i++) {
+		int s = [self secondsFromDiscogsDuration:[[dgTracks objectAtIndex:i] objectForKey:@"duration"]];
+		if(s > 0) withDur++;
+		[dgSecs addObject:[NSNumber numberWithInt:s]];
+	}
+	if(withDur*2 >= (int)[dgTracks count]) return [self durations:dgSecs matchDurations:discSecs];
+	/* Few/no durations to compare: accept only an exact audio-track-count match. */
+	return ((int)[dgTracks count] == audioN);
+}
+
+/* Candidate Discogs release ids for an album, in relevance order. With a token, the
+   authenticated database search; otherwise the search page scraped past Cloudflare
+   through the local FlareSolverr, with the release ids parsed from the HTML. */
+- (NSArray *)discogsSearchReleaseIDsForAlbum:(NSString *)album artist:(NSString *)artist
+{
+	NSMutableArray *ids = [NSMutableArray array];
+	if(![album length]) return ids;
+	BOOL various = (!artist || [artist caseInsensitiveCompare:@"Various Artists"] == NSOrderedSame);
+	NSString *token = [self discogsToken];
+	if([token length]) {
+		NSMutableString *q = [NSMutableString stringWithString:album];
+		if(!various && [artist length]) [q appendFormat:@" %@", artist];
+		NSString *enc = [q stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+		NSString *urlStr = [NSString stringWithFormat:@"https://api.discogs.com/database/search?type=release&q=%@&per_page=20&token=%@", enc, token];
+		NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+		[req setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
+		[req setTimeoutInterval:20.0];
+		NSData *data = [self synchronousDataForRequest:req timeout:20.0];
+		if(data) {
+			id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+			NSArray *results = [json isKindOfClass:[NSDictionary class]] ? [json objectForKey:@"results"] : nil;
+			if([results isKindOfClass:[NSArray class]]) {
+				int i;
+				for(i=0;i<[results count];i++) {
+					id rid = [[results objectAtIndex:i] objectForKey:@"id"];
+					if(rid) { NSString *s = [NSString stringWithFormat:@"%@", rid]; if(![ids containsObject:s]) [ids addObject:s]; }
+				}
+			}
+		}
+		if([ids count]) return ids; /* otherwise fall through to FlareSolverr */
+	}
+	NSString *enc = [album stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+	NSString *searchURL = [NSString stringWithFormat:@"https://www.discogs.com/search/?q=%@&type=release", enc];
+	NSDictionary *body = [NSDictionary dictionaryWithObjectsAndKeys:@"request.get",@"cmd",searchURL,@"url",[NSNumber numberWithInt:60000],@"maxTimeout",nil];
+	NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+	if(!bodyData) return ids;
+	NSMutableURLRequest *fsReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"http://127.0.0.1:8191/v1"]];
+	[fsReq setHTTPMethod:@"POST"];
+	[fsReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+	[fsReq setHTTPBody:bodyData];
+	[fsReq setTimeoutInterval:90.0];
+	NSData *fsData = [self synchronousDataForRequest:fsReq timeout:95.0];
+	if(!fsData) return ids;
+	id fsJson = [NSJSONSerialization JSONObjectWithData:fsData options:0 error:nil];
+	NSString *html = ([fsJson isKindOfClass:[NSDictionary class]]) ? [[fsJson objectForKey:@"solution"] objectForKey:@"response"] : nil;
+	if(![html length]) return ids;
+	NSScanner *sc = [NSScanner scannerWithString:html];
+	while(![sc isAtEnd] && [ids count] < 10) {
+		if(![sc scanUpToString:@"/release/" intoString:NULL]) break;
+		if(![sc scanString:@"/release/" intoString:NULL]) break;
+		NSString *digits = nil;
+		if([sc scanCharactersFromSet:[NSCharacterSet decimalDigitCharacterSet] intoString:&digits] && [digits length]) {
+			if(![ids containsObject:digits]) [ids addObject:digits];
+		}
+	}
+	return ids;
+}
+
+/* Direct Discogs search for this disc's cover/metadata — used when the MusicBrainz
+   paths (TOC, name search -> Discogs link) find nothing, i.e. the disc is on Discogs
+   but not in MusicBrainz. Searches by album (+ artist for non-compilations), then
+   verifies each candidate against the disc before accepting it. */
+- (NSDictionary *)discogsSearchInfoForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame album:(NSString *)album artist:(NSString *)artist
+{
+	if(![trackList count]) return nil;
+	NSDictionary *meta = [[trackList objectAtIndex:0] metadata];
+	if(![album length]) album = [meta objectForKey:XLD_METADATA_ALBUM];
+	if(![artist length]) artist = [meta objectForKey:XLD_METADATA_ALBUMARTIST];
+	if(![album length]) return nil;
+	NSArray *ids = [self discogsSearchReleaseIDsForAlbum:album artist:artist];
+	int i, checked = 0;
+	for(i=0;i<[ids count] && checked < 6;i++) {
+		checked++;
+		NSDictionary *info = [self discogsInfoFromReleaseID:[ids objectAtIndex:i]];
+		if(info && [self discogsInfo:info matchesTrackList:trackList]) return info;
+	}
+	return nil;
+}
+
 /* The full-size cover-art URLs for this disc from Discogs (primary first, then the
    secondary scans — back, disc, etc.), so the UI can offer more than one image.
    The Discogs release API returns the whole images array with i.discogs.com uris;
@@ -1196,6 +1364,28 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		/* Names last resort: if CDDB/MusicBrainz left the tracks unnamed, fill them
 		   from the Discogs tracklist we just fetched (mapped by order). Only fills a
 		   track still missing a title, so it never clobbers names that did arrive. */
+		if([[info objectForKey:@"tracks"] count])
+			[self performSelectorOnMainThread:@selector(fillTrackNamesFromDiscogs:) withObject:[NSArray arrayWithObjects:cueParser,info,nil] waitUntilDone:NO];
+		[inner release];
+	}
+	/* Still nothing: the disc may be on Discogs but not MusicBrainz (so the
+	   MB-centric paths above never reached it). Search Discogs directly and verify
+	   each candidate against the disc before using its artwork/names. */
+	if(![cueParser coverData]) {
+		NSAutoreleasePool *inner = [[NSAutoreleasePool alloc] init];
+		NSDictionary *info = [self discogsSearchInfoForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames] album:[cueParser title] artist:[cueParser artist]];
+		NSArray *urls = [info objectForKey:@"images"];
+		if([urls count]) {
+			[cueParser setCoverImageURLs:urls];
+			[cueParser setCoverImageIndex:0];
+			NSData *dg = [self coverDataFromURLString:[urls objectAtIndex:0]];
+			if([dg length] && ![cueParser coverData]) {
+				NSImage *img = [[NSImage alloc] initWithData:dg];
+				if(img && [img isValid]) [cueParser setCoverData:dg];
+				if(img) [img release];
+			}
+			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+		}
 		if([[info objectForKey:@"tracks"] count])
 			[self performSelectorOnMainThread:@selector(fillTrackNamesFromDiscogs:) withObject:[NSArray arrayWithObjects:cueParser,info,nil] waitUntilDone:NO];
 		[inner release];
@@ -6130,6 +6320,30 @@ fail:
 			[o_themePopUp setTarget:self];
 			[o_themePopUp setAction:@selector(themeColorChanged:)];
 			[gv addSubview:o_themePopUp];
+		}
+	}
+	/* Discogs personal access token field, to the right of "Preferred Service" on the
+	   CDDB pane. Optional — when set, the Discogs cover/metadata search uses the
+	   authenticated Discogs API directly (otherwise it falls back to FlareSolverr). */
+	{
+		NSView *cv = [o_preferredService superview];
+		if(cv && !o_discogsToken) {
+			NSTextField *lbl = [[[NSTextField alloc] initWithFrame:NSMakeRect(300, 20, 52, 16)] autorelease];
+			[lbl setEditable:NO]; [lbl setBordered:NO]; [lbl setDrawsBackground:NO]; [lbl setSelectable:NO];
+			[lbl setStringValue:LS(@"Discogs :")];
+			[lbl setFont:[NSFont systemFontOfSize:11]];
+			[cv addSubview:lbl];
+			NSTextField *tf = [[NSTextField alloc] initWithFrame:NSMakeRect(354, 16, 112, 22)];
+			[[tf cell] setPlaceholderString:LS(@"API token")];
+			[[tf cell] setScrollable:YES];
+			[tf setFont:[NSFont systemFontOfSize:11]];
+			[tf setToolTip:LS(@"Optional Discogs personal access token (discogs.com/developers). When set, cover-art lookups that aren't in MusicBrainz are searched directly on Discogs.")];
+			NSString *tok = [[NSUserDefaults standardUserDefaults] stringForKey:@"DiscogsToken"];
+			if([tok length]) [tf setStringValue:tok];
+			[tf setTarget:self];
+			[tf setAction:@selector(discogsTokenChanged:)];
+			[cv addSubview:tf];
+			o_discogsToken = tf; /* owned by the view hierarchy */
 		}
 	}
 	{

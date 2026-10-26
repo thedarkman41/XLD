@@ -163,6 +163,7 @@
 	BOOL ejected;
 	id overrideCueParser; /* when set, the next beginDecode: targets this disc, not the selected one (unmount handoff for parallel rips) */
 	NSPopUpButton *o_themePopUp; /* theme-color selector in Preferences > General */
+	id o_discogsToken; /* Discogs personal access token field in Preferences > CDDB */
 	NSString *musicAppName;
 	NSTimeInterval lastClickTime;
 	BOOL forceFullMBTag;
@@ -218,6 +219,9 @@
 - (NSStringEncoding)encoding;
 - (int)maxThreads;
 - (BOOL)isDeviceRipping:(NSString *)dev;
+- (void)stopRipByDevice:(NSString *)dev;
+- (NSString *)discogsToken;
+- (IBAction)discogsTokenChanged:(id)sender;
 - (void)queueBusyDevicesChanged;
 - (void)discRippedWithResult:(id)result;
 - (void)accurateRipCheckDidFinish:(id)result;
@@ -251,4 +255,3 @@
 - (NSString *)currentOutputFormatTitle;
 - (void)selectOutputFormatWithTitle:(NSString *)title;
 @end
-- (void)stopRipByDevice:(NSString *)dev;
