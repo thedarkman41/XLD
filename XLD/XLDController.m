@@ -1196,6 +1196,85 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return nil;
 }
 
+/* A title normalised for loose matching: lowercase, letters/digits only. */
+- (NSString *)normalizedTitleKey:(NSString *)s
+{
+	if(![s length]) return @"";
+	NSMutableString *m = [NSMutableString string];
+	NSString *low = [s lowercaseString];
+	NSUInteger i, n = [low length];
+	for(i=0;i<n;i++) {
+		unichar c = [low characterAtIndex:i];
+		if((c>='a'&&c<='z') || (c>='0'&&c<='9')) [m appendFormat:@"%C", c];
+	}
+	return m;
+}
+
+/* The Discogs release id in a .../release/<digits>-... URL, else nil. */
+- (NSString *)discogsReleaseIDFromURLString:(NSString *)url
+{
+	if(![url length]) return nil;
+	NSRange rr = [url rangeOfString:@"/release/"];
+	if(rr.location == NSNotFound) return nil;
+	NSString *tail = [url substringFromIndex:rr.location + rr.length];
+	NSUInteger j = 0, tl = [tail length];
+	while(j < tl) { unichar c = [tail characterAtIndex:j]; if(c<'0'||c>'9') break; j++; }
+	return (j>0) ? [tail substringToIndex:j] : nil;
+}
+
+/* FINAL cover/metadata fallback: the local SearXNG server's Discogs engine
+   (token-backed, http://127.0.0.1:8899/api/search?engines=discogs). Used only
+   when every MusicBrainz and direct-Discogs path above found no image. Prefers a
+   title-matching candidate whose release verifies against the disc (track count /
+   durations, full-size images + names); if none verify, falls back to the top
+   title-matching result's own cover thumbnail — a best-effort "find something"
+   for a disc that would otherwise stay blank. Returns nil if SearXNG is down. */
+- (NSDictionary *)searxngDiscogsInfoForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame album:(NSString *)album artist:(NSString *)artist
+{
+	if(![trackList count]) return nil;
+	NSDictionary *meta = [[trackList objectAtIndex:0] metadata];
+	if(![album length]) album = [meta objectForKey:XLD_METADATA_ALBUM];
+	if(![album length]) return nil;
+	NSString *enc = [album stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+	NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:8899/api/search?q=%@&categories=music&engines=discogs", enc];
+	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+	[req setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
+	[req setTimeoutInterval:25.0];
+	NSData *data = [self synchronousDataForRequest:req timeout:30.0];
+	if(!data) return nil;
+	id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+	NSArray *results = [json isKindOfClass:[NSDictionary class]] ? [json objectForKey:@"results"] : nil;
+	if(![results isKindOfClass:[NSArray class]]) return nil;
+
+	NSString *na = [self normalizedTitleKey:album];
+	NSMutableArray *ids = [NSMutableArray array];
+	NSString *looseImage = nil;
+	int i;
+	for(i=0;i<[results count];i++) {
+		NSDictionary *r = [results objectAtIndex:i];
+		if(![r isKindOfClass:[NSDictionary class]]) continue;
+		NSString *nt = [self normalizedTitleKey:[r objectForKey:@"title"]];
+		/* keep only results whose title shares the album title (either direction) */
+		if(![na length] || ![nt length]) continue;
+		if([nt rangeOfString:na].location == NSNotFound && [na rangeOfString:nt].location == NSNotFound) continue;
+		NSString *rid = [self discogsReleaseIDFromURLString:[r objectForKey:@"url"]];
+		if([rid length] && ![ids containsObject:rid]) [ids addObject:rid];
+		NSString *img = [r objectForKey:@"img_src"];
+		if(!looseImage && [img length]) looseImage = img;
+	}
+	/* 1) verified: fetch each candidate's release and match it to the disc. */
+	int checked = 0;
+	for(i=0;i<[ids count] && checked < 6;i++) {
+		checked++;
+		NSDictionary *info = [self discogsInfoFromReleaseID:[ids objectAtIndex:i]];
+		if(info && [self discogsInfo:info matchesTrackList:trackList]) return info;
+	}
+	/* 2) nothing verified — use the top title-matching cover as a last resort. */
+	if([looseImage length])
+		return [NSDictionary dictionaryWithObjectsAndKeys:[NSArray arrayWithObject:looseImage],@"images",[NSArray array],@"tracks",nil];
+	return nil;
+}
+
 /* The full-size cover-art URLs for this disc from Discogs (primary first, then the
    secondary scans — back, disc, etc.), so the UI can offer more than one image.
    The Discogs release API returns the whole images array with i.discogs.com uris;
@@ -1374,6 +1453,28 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	if(![cueParser coverData]) {
 		NSAutoreleasePool *inner = [[NSAutoreleasePool alloc] init];
 		NSDictionary *info = [self discogsSearchInfoForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames] album:[cueParser title] artist:[cueParser artist]];
+		NSArray *urls = [info objectForKey:@"images"];
+		if([urls count]) {
+			[cueParser setCoverImageURLs:urls];
+			[cueParser setCoverImageIndex:0];
+			NSData *dg = [self coverDataFromURLString:[urls objectAtIndex:0]];
+			if([dg length] && ![cueParser coverData]) {
+				NSImage *img = [[NSImage alloc] initWithData:dg];
+				if(img && [img isValid]) [cueParser setCoverData:dg];
+				if(img) [img release];
+			}
+			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
+		}
+		if([[info objectForKey:@"tracks"] count])
+			[self performSelectorOnMainThread:@selector(fillTrackNamesFromDiscogs:) withObject:[NSArray arrayWithObjects:cueParser,info,nil] waitUntilDone:NO];
+		[inner release];
+	}
+	/* Final fallback: ask the local SearXNG server's token-backed Discogs engine.
+	   Last resort for a disc still without any image — prefers a verified release,
+	   else uses the top title-matching Discogs cover so the disc isn't left blank. */
+	if(![cueParser coverData]) {
+		NSAutoreleasePool *inner = [[NSAutoreleasePool alloc] init];
+		NSDictionary *info = [self searxngDiscogsInfoForTrackList:[cueParser trackList] totalFrame:(int)[cueParser totalFrames] album:[cueParser title] artist:[cueParser artist]];
 		NSArray *urls = [info objectForKey:@"images"];
 		if([urls count]) {
 			[cueParser setCoverImageURLs:urls];
