@@ -1891,17 +1891,40 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 - (NSString *)routedRipBaseForCueParser:(id)cueParser
 {
 	/* Route CD rips into a fixed music-library layout:
-	   - compilations        -> /Volumes/Newton/Music/Compilations
+	   - soundtracks         -> /Volumes/Newton/Music/Soundtracks
+	   - compilations / any
+	     "Various Artists" disc -> /Volumes/Newton/Music/Compilations
 	   - single artist/group -> /Volumes/Newton/Music/<first letter of the
 	     artist name ignoring a leading "The ">/<full artist name> */
 	NSString *root = @"/Volumes/Newton/Music";
+	id firstMeta = [[cueParser trackList] count] ? [[[cueParser trackList] objectAtIndex:0] metadata] : nil;
+	NSString *artist = [cueParser artist];
+	NSString *albumArtist = firstMeta ? [firstMeta objectForKey:XLD_METADATA_ALBUMARTIST] : nil;
+
+	/* A "Various Artists" disc is a compilation even when the compilation flag was
+	   never set (e.g. FreeDB-only metadata) — route it by the disc/album artist. */
 	BOOL comp = [cueParser isCompilation];
-	if(!comp && [[cueParser trackList] count]) {
-		id c = [[[[cueParser trackList] objectAtIndex:0] metadata] objectForKey:XLD_METADATA_COMPILATION];
+	if(!comp && firstMeta) {
+		id c = [firstMeta objectForKey:XLD_METADATA_COMPILATION];
 		if(c && [c boolValue]) comp = YES;
 	}
-	if(comp) return [root stringByAppendingPathComponent:@"Compilations"];
-	NSString *artist = [cueParser artist];
+	if(!comp && ([artist caseInsensitiveCompare:@"Various Artists"] == NSOrderedSame
+	             || (albumArtist && [albumArtist caseInsensitiveCompare:@"Various Artists"] == NSOrderedSame)))
+		comp = YES;
+
+	if(comp) {
+		/* A soundtrack goes to its own folder rather than Compilations. MusicBrainz
+		   marks it as a secondary release type ("album; soundtrack"); FreeDB may put
+		   it in the genre instead. */
+		BOOL soundtrack = NO;
+		NSString *rt = firstMeta ? [firstMeta objectForKey:XLD_METADATA_RELEASETYPE] : nil;
+		if(rt && [rt rangeOfString:@"soundtrack" options:NSCaseInsensitiveSearch].location != NSNotFound) soundtrack = YES;
+		if(!soundtrack) {
+			NSString *genre = firstMeta ? [firstMeta objectForKey:XLD_METADATA_GENRE] : nil;
+			if(genre && [genre rangeOfString:@"soundtrack" options:NSCaseInsensitiveSearch].location != NSNotFound) soundtrack = YES;
+		}
+		return [root stringByAppendingPathComponent:(soundtrack ? @"Soundtracks" : @"Compilations")];
+	}
 	if(!artist || ![artist length]) artist = @"Unknown Artist";
 	NSString *sortName = artist;
 	if([[sortName lowercaseString] hasPrefix:@"the "]) sortName = [sortName substringFromIndex:4];
