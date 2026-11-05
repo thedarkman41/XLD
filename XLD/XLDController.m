@@ -3495,6 +3495,12 @@ end:
 		[o_filenameFormat setStringValue:obj];
 	}
 	if(obj=[pref objectForKey:@"CDDBServer"]) {
+		/* freedb.org shut down in 2020, so a saved freedb.org host (e.g. the old
+		   default freedb.freedb.org) is dead and every CDDB lookup silently fails.
+		   Repoint it to the live gnudb successor so existing users' lookups work. */
+		if([obj isKindOfClass:[NSString class]]
+		   && [obj rangeOfString:@"freedb.org" options:NSCaseInsensitiveSearch].location != NSNotFound)
+			obj = @"gnudb.gnudb.org";
 		[o_cddbServer setStringValue:obj];
 	}
 	if(obj=[pref objectForKey:@"CDDBServerPath"]) {
