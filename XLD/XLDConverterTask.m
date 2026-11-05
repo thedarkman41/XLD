@@ -75,6 +75,11 @@ static const int fontSizeForSpeed = 9;
 
 - (NSString *)primaryOutputPath
 {
+	/* dstPathStr is the single primary output file for BOTH single- and multi-encoder
+	   tasks (set from outputPathStr after the encoder branch in beginConvert);
+	   outputPathStrArray is only populated for the multi-encoder case, so it's empty
+	   for a normal CD->one-format rip. Prefer dstPathStr, fall back to the array. */
+	if([dstPathStr length]) return dstPathStr;
 	return ([outputPathStrArray count]) ? [outputPathStrArray objectAtIndex:0] : nil;
 }
 
@@ -83,7 +88,7 @@ static const int fontSizeForSpeed = 9;
 	/* Reveal this task's output in Finder: the output file if it exists yet,
 	   otherwise its output folder. */
 	NSFileManager *fm = [NSFileManager defaultManager];
-	NSString *file = ([outputPathStrArray count]) ? [outputPathStrArray objectAtIndex:0] : nil;
+	NSString *file = [self primaryOutputPath];
 	if(file && [fm fileExistsAtPath:file])
 		[[NSWorkspace sharedWorkspace] selectFile:file inFileViewerRootedAtPath:[file stringByDeletingLastPathComponent]];
 	else if([outDir length] && [fm fileExistsAtPath:outDir])
