@@ -1365,6 +1365,76 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return [picks count] ? [picks componentsJoinedByString:@" "] : nil;
 }
 
+/* Release ids from the Discogs *website* search (discogs.com/search) via FlareSolverr.
+   This is deliberately NOT the database/search API path: the website and the API index
+   and rank differently, and some thinly-catalogued releases (durationless promos) only
+   surface on the website. Used for the spelling-variant last resort. Up to 10 ids. */
+- (NSArray *)discogsReleaseIDsViaWebsiteSearch:(NSString *)query
+{
+	NSMutableArray *ids = [NSMutableArray array];
+	if(![query length]) return ids;
+	NSString *enc = [query stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+	NSString *searchURL = [NSString stringWithFormat:@"https://www.discogs.com/search/?q=%@&type=release", enc];
+	NSDictionary *body = [NSDictionary dictionaryWithObjectsAndKeys:@"request.get",@"cmd",searchURL,@"url",[NSNumber numberWithInt:60000],@"maxTimeout",nil];
+	NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+	if(!bodyData) return ids;
+	NSMutableURLRequest *fsReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"http://127.0.0.1:8191/v1"]];
+	[fsReq setHTTPMethod:@"POST"];
+	[fsReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+	[fsReq setHTTPBody:bodyData];
+	[fsReq setTimeoutInterval:90.0];
+	NSData *fsData = [self synchronousDataForRequest:fsReq timeout:95.0];
+	if(!fsData) return ids;
+	id fsJson = [NSJSONSerialization JSONObjectWithData:fsData options:0 error:nil];
+	NSString *html = ([fsJson isKindOfClass:[NSDictionary class]]) ? [[fsJson objectForKey:@"solution"] objectForKey:@"response"] : nil;
+	if(![html length]) return ids;
+	NSScanner *sc = [NSScanner scannerWithString:html];
+	while(![sc isAtEnd] && [ids count] < 10) {
+		if(![sc scanUpToString:@"/release/" intoString:NULL]) break;
+		if(![sc scanString:@"/release/" intoString:NULL]) break;
+		NSString *digits = nil;
+		if([sc scanCharactersFromSet:[NSCharacterSet decimalDigitCharacterSet] intoString:&digits] && [digits length]) {
+			if(![ids containsObject:digits]) [ids addObject:digits];
+		}
+	}
+	return ids;
+}
+
+/* Spelling-collapsed search queries for an album whose CDDB word boundaries may
+   differ from Discogs' (e.g. a disc titled "School House Rock - The Box Set Sampler"
+   where Discogs has "Schoolhouse Rock ..."). From the title with " - " flattened and
+   leading articles dropped, produce the base plus one variant per adjacent pair of
+   *significant* (non-generic) words joined — so "School House" -> "SchoolHouse" is
+   tried, but generic tails like "Box Set" are left alone. Bounded and used only as a
+   last resort, so the extra searches are rare. */
+- (NSArray *)spellingVariantQueriesForAlbum:(NSString *)album
+{
+	if(![album length]) return [NSArray array];
+	NSMutableString *b = [NSMutableString stringWithString:album];
+	[b replaceOccurrencesOfString:@" - " withString:@" " options:0 range:NSMakeRange(0,[b length])];
+	NSArray *raw = [b componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	NSSet *articles = [NSSet setWithObjects:@"the",@"a",@"an",nil];
+	NSMutableArray *words = [NSMutableArray array];
+	int i;
+	for(i=0;i<[raw count];i++) {
+		NSString *w = [raw objectAtIndex:i];
+		if([w length] && ![articles containsObject:[w lowercaseString]]) [words addObject:w];
+	}
+	if([words count] < 2) return [NSArray array];
+	NSMutableArray *out = [NSMutableArray array];
+	[out addObject:[words componentsJoinedByString:@" "]];
+	for(i=0;i+1<(int)[words count] && [out count] < 5;i++) {
+		NSString *w1 = [words objectAtIndex:i], *w2 = [words objectAtIndex:i+1];
+		if(![[self significantTitleWords:w1] count] || ![[self significantTitleWords:w2] count]) continue;
+		NSMutableArray *v = [NSMutableArray arrayWithArray:words];
+		[v replaceObjectAtIndex:i withObject:[w1 stringByAppendingString:w2]];
+		[v removeObjectAtIndex:i+1];
+		NSString *q = [v componentsJoinedByString:@" "];
+		if(![out containsObject:q]) [out addObject:q];
+	}
+	return out;
+}
+
 /* The best-matching Discogs release among candidate ids, by track-title overlap —
    deterministic (highest overlap wins, not whichever happened to be checked first).
    Returns nil if none clears discogsInfo:matchesTrackList:. */
@@ -1403,8 +1473,28 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		NSArray *ttids = [self discogsReleaseIDsForQuery:ttq various:various artist:artist];
 		int i; for(i=0;i<[ttids count];i++) if(![ids containsObject:[ttids objectAtIndex:i]]) [ids addObject:[ttids objectAtIndex:i]];
 	}
-	if(![ids count]) return nil;
-	return [self bestDiscogsInfoForTrackList:trackList fromReleaseIDs:ids];
+	NSDictionary *best = ([ids count]) ? [self bestDiscogsInfoForTrackList:trackList fromReleaseIDs:ids] : nil;
+	if(best) return best;
+	/* Last resort: nothing matched by the disc's own album/track titles — the CDDB
+	   title's word boundaries may differ from Discogs' (e.g. "School House Rock" vs
+	   "Schoolhouse Rock"). Try spelling-collapsed album variants through the real
+	   Discogs search. Reached only when everything above failed, so these extra
+	   searches are rare. A candidate still has to clear the track-title match, so a
+	   bad spelling guess can't tag the disc wrongly. */
+	if([album length] && ![self isPlaceholderDiscTitle:album]) {
+		NSArray *sv = [self spellingVariantQueriesForAlbum:album];
+		NSMutableArray *sids = [NSMutableArray array];
+		int i;
+		for(i=0;i<[sv count];i++) {
+			NSArray *vids = [self discogsReleaseIDsViaWebsiteSearch:[sv objectAtIndex:i]];
+			int j; for(j=0;j<[vids count];j++) {
+				NSString *rid = [vids objectAtIndex:j];
+				if(![sids containsObject:rid] && ![ids containsObject:rid]) [sids addObject:rid];
+			}
+		}
+		if([sids count]) best = [self bestDiscogsInfoForTrackList:trackList fromReleaseIDs:sids];
+	}
+	return best;
 }
 
 /* A title normalised for loose matching: lowercase, letters/digits only. */
