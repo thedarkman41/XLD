@@ -1509,6 +1509,8 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 				NSImage *img = [[NSImage alloc] initWithData:imgData];
 				if(img && [img isValid]) {
 					[cueParser setCoverData:imgData];
+					os_log(os_log_create("jp.tmkk.XLD", "cover"), "cover SET via MusicBrainz/CAA album=%{public}s url=%{public}s",
+						   [[cueParser title] UTF8String] ?: "(nil)", [[art absoluteString] UTF8String] ?: "(nil)");
 					[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
 				}
 				if(img) [img release];
@@ -1537,7 +1539,11 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			NSData *dg = [self coverDataFromURLString:[urls objectAtIndex:0]];
 			if([dg length] && ![cueParser coverData]) {
 				NSImage *img = [[NSImage alloc] initWithData:dg];
-				if(img && [img isValid]) [cueParser setCoverData:dg];
+				if(img && [img isValid]) {
+					[cueParser setCoverData:dg];
+					os_log(os_log_create("jp.tmkk.XLD", "cover"), "cover SET via Discogs-by-tracklist album=%{public}s url=%{public}s",
+						   [[cueParser title] UTF8String] ?: "(nil)", [[urls objectAtIndex:0] UTF8String] ?: "(nil)");
+				}
 				if(img) [img release];
 			}
 			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
@@ -1562,7 +1568,11 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			NSData *dg = [self coverDataFromURLString:[urls objectAtIndex:0]];
 			if([dg length] && ![cueParser coverData]) {
 				NSImage *img = [[NSImage alloc] initWithData:dg];
-				if(img && [img isValid]) [cueParser setCoverData:dg];
+				if(img && [img isValid]) {
+					[cueParser setCoverData:dg];
+					os_log(os_log_create("jp.tmkk.XLD", "cover"), "cover SET via Discogs-search album=%{public}s url=%{public}s",
+						   [[cueParser title] UTF8String] ?: "(nil)", [[urls objectAtIndex:0] UTF8String] ?: "(nil)");
+				}
 				if(img) [img release];
 			}
 			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
@@ -1584,7 +1594,11 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			NSData *dg = [self coverDataFromURLString:[urls objectAtIndex:0]];
 			if([dg length] && ![cueParser coverData]) {
 				NSImage *img = [[NSImage alloc] initWithData:dg];
-				if(img && [img isValid]) [cueParser setCoverData:dg];
+				if(img && [img isValid]) {
+					[cueParser setCoverData:dg];
+					os_log(os_log_create("jp.tmkk.XLD", "cover"), "cover SET via SearXNG-Discogs album=%{public}s url=%{public}s",
+						   [[cueParser title] UTF8String] ?: "(nil)", [[urls objectAtIndex:0] UTF8String] ?: "(nil)");
+				}
 				if(img) [img release];
 			}
 			[discView performSelectorOnMainThread:@selector(reloadData) withObject:nil waitUntilDone:NO];
