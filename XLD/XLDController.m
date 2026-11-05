@@ -1136,6 +1136,46 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return info;
 }
 
+/* The set of "significant" words in a title: lowercased alphanumeric tokens of 3+
+   chars, minus generic filler that carries no identity (a promo "Box Set Sampler"
+   shares "box"/"set"/"sampler" with any other). Used to sanity-check a title match
+   when stronger signals (durations) are unavailable. */
+- (NSSet *)significantTitleWords:(NSString *)s
+{
+	static NSSet *stop = nil;
+	if(!stop) stop = [[NSSet alloc] initWithObjects:
+		@"the",@"and",@"feat",@"featuring",@"with",@"vol",@"volume",@"pt",@"part",
+		@"box",@"set",@"sampler",@"samples",@"various",@"artists",@"artist",@"disc",
+		@"disk",@"cd",@"cdr",@"lp",@"ep",@"promo",@"promotional",@"single",@"edition",
+		@"compilation",@"collection",@"series",@"records",@"music",@"songs",@"soundtrack",
+		@"ost",@"original",@"motion",@"picture",@"deluxe",@"remastered",@"reissue",nil];
+	NSMutableSet *out = [NSMutableSet set];
+	if(![s length]) return out;
+	NSArray *parts = [[s lowercaseString] componentsSeparatedByCharactersInSet:[[NSCharacterSet alphanumericCharacterSet] invertedSet]];
+	int i;
+	for(i=0;i<[parts count];i++) {
+		NSString *w = [parts objectAtIndex:i];
+		if([w length] < 3) continue;
+		if([stop containsObject:w]) continue;
+		[out addObject:w];
+	}
+	return out;
+}
+
+/* Do two titles share at least one significant (identity-carrying) word? Returns NO
+   when either side has no significant words, so a disc with a purely generic title
+   never passes relevance on its own. */
+- (BOOL)title:(NSString *)a sharesSignificantWordWith:(NSString *)b
+{
+	NSSet *sa = [self significantTitleWords:a];
+	NSSet *sb = [self significantTitleWords:b];
+	if(![sa count] || ![sb count]) return NO;
+	int i;
+	NSArray *aw = [sa allObjects];
+	for(i=0;i<[aw count];i++) if([sb containsObject:[aw objectAtIndex:i]]) return YES;
+	return NO;
+}
+
 /* Does a Discogs release (its info dict) actually describe this disc? Audio-track
    count must line up (allow one trailing data/hidden track) and, when Discogs
    carries durations for most tracks, those durations must match the disc's TOC —
@@ -1155,8 +1195,14 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		[dgSecs addObject:[NSNumber numberWithInt:s]];
 	}
 	if(withDur*2 >= (int)[dgTracks count]) return [self durations:dgSecs matchDurations:discSecs];
-	/* Few/no durations to compare: accept only an exact audio-track-count match. */
-	return ((int)[dgTracks count] == audioN);
+	/* Few/no durations to compare: an exact audio-track-count match is NOT enough on
+	   its own — a 10-track durationless promo of an unrelated artist ("The Aeroplane
+	   Flies High (Box Set Sampler)") otherwise matched a 10-track "... Box Set Sampler"
+	   disc purely on count. Require the release title to also share a significant,
+	   non-generic word with the disc's album title. */
+	if((int)[dgTracks count] != audioN) return NO;
+	NSString *discAlbum = [[[trackList objectAtIndex:0] metadata] objectForKey:XLD_METADATA_ALBUM];
+	return [self title:discAlbum sharesSignificantWordWith:[info objectForKey:@"album"]];
 }
 
 /* Candidate Discogs release ids for an album, in relevance order. With a token, the
@@ -1358,9 +1404,15 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 			if(![nt length]) continue;
 			if([nt rangeOfString:nv].location == NSNotFound && [nv rangeOfString:nt].location == NSNotFound) continue;
 			NSString *rid = [self discogsReleaseIDFromURLString:[r objectForKey:@"url"]];
-			if([rid length] && ![ids containsObject:rid]) [ids addObject:rid];
+			if(![rid length]) continue; /* releases only — skip artist/label pages (their image is a logo/collage, not this disc's cover) */
+			if(![ids containsObject:rid]) [ids addObject:rid];
 			NSString *img = [r objectForKey:@"img_src"];
-			if(!looseImage && [img length]) looseImage = img;
+			/* Only trust a loose (unverified) cover from a release that shares a
+			   significant, non-generic word with the disc's full title. A generic
+			   variant like "The Box Set Sampler" otherwise pulls an unrelated promo's
+			   art (e.g. a Smashing Pumpkins box-set sampler onto a Schoolhouse Rock disc). */
+			if(!looseImage && [img length] && [self title:album sharesSignificantWordWith:[r objectForKey:@"title"]])
+				looseImage = img;
 		}
 	}
 	int i;
