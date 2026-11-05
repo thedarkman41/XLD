@@ -9,6 +9,7 @@
 #import "XLDQueue.h"
 #import "XLDConverterTask.h"
 #import "XLDCDDAResult.h"
+#import <os/log.h>
 
 extern int XLDDarkModeSupportEnabled;
 
@@ -201,6 +202,26 @@ extern int XLDDarkModeSupportEnabled;
 		}
 		lowestActivePosition = errorCount;
 		if(checkUpdateStatus) [delegate setCheckUpdateStatus:YES];
+		/* Self-heal a stranded drive. threadsOccupied==0 means NO convert worker is
+		   running, so every optical drive is genuinely free and busyDevices (a counted
+		   set) must be empty. If a count leaked (a startTask not balanced by a finish,
+		   e.g. a worker that exited without dispatching convertFinished:), a finished
+		   disc's still-queued tasks were blocked by canStartTask: forever — leaving the
+		   disc stranded with no eject/log/cue/SpotOn icons though its tracks all ripped.
+		   Reconcile to the true idle state and give any still-waiting tasks another
+		   chance to start; the restarted task's convertFinished: then finalises the disc
+		   normally. Never restarts a finished task (those are already removed from
+		   taskArr; any task left is one that never started, running==NO). */
+		if([busyDevices count]) {
+			NSLog(@"[XLD] idle but busyDevices still holds %lu ref(s); reconciling and re-dispatching queued tasks (stranded-drive self-heal)", (unsigned long)[busyDevices count]);
+			[lock lock];
+			[busyDevices removeAllObjects];
+			for(i=0;i<[taskArr count];i++) {
+				id waitingTask = [taskArr objectAtIndex:i];
+				if(![waitingTask isActive] && [self canStartTask:waitingTask]) [self startTask:waitingTask];
+			}
+			[lock unlock];
+		}
 	}
 	if(rippingSession) {
 		if(result && result->pending) result->pending = NO;
@@ -211,9 +232,13 @@ extern int XLDDarkModeSupportEnabled;
 		   the session while the others still hold it, so their convertFinished:
 		   messaged freed memory and crashed. */
 		BOOL othersUseSession = NO;
+		int sessionRefs = 0;
 		for(i=0;i<[taskArr count];i++) {
-			if([[taskArr objectAtIndex:i] rippingSession] == rippingSession) { othersUseSession = YES; break; }
+			if([[taskArr objectAtIndex:i] rippingSession] == rippingSession) { othersUseSession = YES; sessionRefs++; }
 		}
+		os_log_t qlog = os_log_create("jp.tmkk.XLD", "finalize");
+		os_log(qlog, "convertFinished finalize-check: othersUseSession=%d sessionRefs=%d allTasksFinished=%d taskArr=%lu",
+			   othersUseSession, sessionRefs, [rippingSession allTasksFinished], (unsigned long)[taskArr count]);
 		/* Finalise once NO other queued task still references this disc's session.
 		   When that holds, every track task of the disc has already run through
 		   convertFinished: and been removed, so THIS is the disc's last chance to be
@@ -224,13 +249,16 @@ extern int XLDDarkModeSupportEnabled;
 		   NO at this final moment and stranded the disc forever — no eject, no log/cue,
 		   no SpotOn icons, though every track had ripped and embedded its art. */
 		if(!othersUseSession) {
-			if(![rippingSession allTasksFinished])
-				NSLog(@"[XLD] finalising disc with allTasksFinished==NO (no tasks left to finish it); check for a stranded result slot");
+			os_log(qlog, "finalising disc (allTasksFinished=%d)", [rippingSession allTasksFinished]);
 			XLDCDDAResult *resultObj = [[rippingSession result] retain];
 			[rippingSession destroy];
 			[delegate discRippedWithResult:resultObj];
 			[resultObj release];
 		}
+	}
+	else {
+		os_log_t qlog = os_log_create("jp.tmkk.XLD", "finalize");
+		os_log(qlog, "convertFinished for task with NIL rippingSession (no disc finalize attempted)");
 	}
 	/* Refresh the Queue glyph's enabled state (and the busy-row Cylon) now that a
 	   task finished — it disables once nothing is ripping. */

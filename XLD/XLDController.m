@@ -2,6 +2,7 @@
 
 #import <stdio.h>
 #import <unistd.h>
+#import <os/log.h>
 #import <sys/sysctl.h>
 #import <objc/objc-runtime.h>
 #import <sys/stat.h>
@@ -5748,28 +5749,50 @@ end:
 	 resultp->droppedCount,
 	 resultp->duplicatedCount);
 	 }*/
-	[result analyzeGain];
-	NSString *log = [result logStr];
-	if(log) [self performSelectorOnMainThread:@selector(showLogStr:) withObject:log waitUntilDone:YES];
-	[result saveLog];
-	[result saveCuesheetIfNeeded];
-	if([result isGoodRip] && ([o_ejectWhenDone state] == NSOnState))
-		[NSThread detachNewThreadSelector:@selector(ejectDisc:) toTarget:opticalDriveManager withObject:[result deviceStr]];
-	else
-		[NSThread detachNewThreadSelector:@selector(mountDisc:) toTarget:opticalDriveManager withObject:[result deviceStr]];
+	/* Instrumented + exception-guarded. The post-rip finishing steps (log, cue, eject,
+	   SpotOn icons) were silently not running for some discs. AppKit's main run loop
+	   swallows an uncaught exception without crashing, so a throw in any step here would
+	   abort the rest invisibly. Wrap the whole thing so a failure is (a) logged with its
+	   reason via os_log (query: log stream --predicate 'subsystem=="jp.tmkk.XLD"'), and
+	   (b) does not abort the remaining steps. Breadcrumbs mark each step so we can see
+	   exactly where a given disc stops. */
+	os_log_t olog = os_log_create("jp.tmkk.XLD", "finalize");
+	NSString *dev = [result deviceStr];
+	os_log(olog, "discRippedWithResult ENTER dev=%{public}s goodRip=%d",
+		   dev ? [dev UTF8String] : "(nil)", [result isGoodRip]);
+	@try {
+		[result analyzeGain];
+		NSString *log = [result logStr];
+		if(log) [self performSelectorOnMainThread:@selector(showLogStr:) withObject:log waitUntilDone:YES];
+	} @catch(NSException *e) { os_log_error(olog, "analyzeGain/logStr threw: %{public}s", [[e description] UTF8String]); }
+	@try { [result saveLog]; }
+	@catch(NSException *e) { os_log_error(olog, "saveLog threw: %{public}s", [[e description] UTF8String]); }
+	@try { [result saveCuesheetIfNeeded]; }
+	@catch(NSException *e) { os_log_error(olog, "saveCuesheetIfNeeded threw: %{public}s", [[e description] UTF8String]); }
+	@try {
+		if([result isGoodRip] && ([o_ejectWhenDone state] == NSOnState))
+			[NSThread detachNewThreadSelector:@selector(ejectDisc:) toTarget:opticalDriveManager withObject:[result deviceStr]];
+		else
+			[NSThread detachNewThreadSelector:@selector(mountDisc:) toTarget:opticalDriveManager withObject:[result deviceStr]];
+	} @catch(NSException *e) { os_log_error(olog, "eject/mount threw: %{public}s", [[e description] UTF8String]); }
 	if([result isGoodRip] && ([o_quitWhenDone state] == NSOnState)) {
 		[NSApp terminate:self];
 	}
 	/* Hand the finished album folder to SpotOn so it applies cover-art Finder
 	   icons to the folder and its tracks. Good rips only; fire-and-forget on a
 	   background thread. */
-	NSString *spotOnFolder = [spotOnFolderByDevice objectForKey:[result deviceStr]];
-	if([result isGoodRip] && spotOnFolder)
-		[self performSelectorInBackground:@selector(handOffToSpotOnThread:) withObject:spotOnFolder];
-	if([result deviceStr]) [spotOnFolderByDevice removeObjectForKey:[result deviceStr]];
+	@try {
+		NSString *spotOnFolder = [spotOnFolderByDevice objectForKey:[result deviceStr]];
+		os_log(olog, "spotOn folder=%{public}s goodRip=%d",
+			   spotOnFolder ? [spotOnFolder UTF8String] : "(nil)", [result isGoodRip]);
+		if([result isGoodRip] && spotOnFolder)
+			[self performSelectorInBackground:@selector(handOffToSpotOnThread:) withObject:spotOnFolder];
+		if([result deviceStr]) [spotOnFolderByDevice removeObjectForKey:[result deviceStr]];
+	} @catch(NSException *e) { os_log_error(olog, "spotOn handoff threw: %{public}s", [[e description] UTF8String]); }
 	[NSApp requestUserAttention:NSInformationalRequest];
 	NSBeep();
 	driveIsBusy = NO;
+	os_log(olog, "discRippedWithResult DONE dev=%{public}s", dev ? [dev UTF8String] : "(nil)");
 }
 
 - (BOOL)requestSpotOnIcons:(NSString *)folder token:(NSString *)token port:(int)port
