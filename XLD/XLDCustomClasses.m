@@ -1066,6 +1066,18 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 @end
 
 @implementation XLDTrackTableView
+/* Right-clicking a row selects it (if it isn't already in the selection) before the
+   context menu opens, so the menu's selection-based items — Check/Uncheck Selected,
+   Show in Finder — act on the row the user actually clicked. */
+- (NSMenu *)menuForEvent:(NSEvent *)event
+{
+	NSPoint pt = [self convertPoint:[event locationInWindow] fromView:nil];
+	NSInteger row = [self rowAtPoint:pt];
+	if(row >= 0 && ![[self selectedRowIndexes] containsIndex:row])
+		[self selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+	return [super menuForEvent:event];
+}
+
 /* The track currently being ripped shows a cyan Cylon light sweeping across its
    row. It is drawn AFTER the cells with additive (plus-lighter) blending, so it
    brightens the row (text included) and is always visible rather than being
