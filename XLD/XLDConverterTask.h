@@ -105,6 +105,7 @@
 - (void)setTagWritable:(BOOL)flag;
 - (void)setTrack:(XLDTrack *)t;
 - (XLDTrack *)track;
+- (NSString *)primaryOutputPath;
 - (void)setScaleType:(XLDScaleType)type;
 - (void)setCompressionQuality:(float)quality;
 - (void)setScaleSize:(int)pixel;

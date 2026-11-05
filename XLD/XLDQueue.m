@@ -130,7 +130,12 @@ extern int XLDDarkModeSupportEnabled;
 		/* Grey only a task that actually ran to a successful finish. A task that
 		   never started (cancelled while waiting), was cancelled mid-rip, or
 		   errored returns its track to the normal state. */
-		[[task track] setRipState:(![task isActive] || [task wasCancelled] || errored) ? 0 : 3];
+		BOOL ripOK = ([task isActive] && ![task wasCancelled] && !errored);
+		[[task track] setRipState:ripOK ? 3 : 0];
+		/* Remember where the finished file landed so the disc view's "Show in Finder"
+		   can reveal it; cleared on a cancel/error so the item disables again. */
+		if([[task track] respondsToSelector:@selector(setOutputPath:)])
+			[[task track] setOutputPath:ripOK ? [task primaryOutputPath] : nil];
 	}
 	int idx = [taskArr indexOfObject:task];
 	XLDCDDARippingSession *rippingSession = [task rippingSession];

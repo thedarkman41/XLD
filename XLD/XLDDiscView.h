@@ -51,6 +51,7 @@
 - (IBAction)checkSelected:(id)sender;
 - (IBAction)uncheckSelected:(id)sender;
 - (IBAction)editMetadata:(id)sender;
+- (IBAction)showTrackInFinder:(id)sender;
 - (IBAction)clearImage:(id)sender;
 - (IBAction)extractionModeChanged:(id)sender;
 - (IBAction)outputFormatChangedFromToolbar:(id)sender;

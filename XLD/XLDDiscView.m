@@ -231,6 +231,17 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 			if(col != tc) [col setResizingMask:NSTableColumnUserResizingMask|NSTableColumnAutoresizingMask];
 		[o_trackTable setAutosaveName:@"XLDTrackTable"];
 		[o_trackTable setAutosaveTableColumns:YES];
+		/* Add "Show in Finder" to the track table's context menu. It is always
+		   present; validateMenuItem: enables it only for a track that has finished
+		   ripping (so its output file exists to reveal). */
+		NSMenu *trackMenu = [o_trackTable menu];
+		if(trackMenu) {
+			[trackMenu addItem:[NSMenuItem separatorItem]];
+			NSMenuItem *sif = [[NSMenuItem alloc] initWithTitle:LS(@"Show in Finder") action:@selector(showTrackInFinder:) keyEquivalent:@""];
+			[sif setTarget:self];
+			[trackMenu addItem:sif];
+			[sif release];
+		}
 	}
 
 	[o_imageView setAcceptClick:YES];
@@ -1078,6 +1089,23 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	[self reloadData];
 }
 
+/* Reveal the right-clicked (or selected) track's ripped file in Finder. Enabled
+   only once the track has finished ripping — see validateMenuItem:. */
+- (IBAction)showTrackInFinder:(id)sender
+{
+	id cueParser = [self cueParser];
+	if(!cueParser) return;
+	NSArray *trackList = [cueParser trackList];
+	int row = [o_trackTable clickedRow];
+	if(row < 0) row = [o_trackTable selectedRow];
+	if(row < 0 || row >= (int)[trackList count]) { NSBeep(); return; }
+	id trk = [trackList objectAtIndex:row];
+	NSString *path = [trk respondsToSelector:@selector(outputPath)] ? [trk outputPath] : nil;
+	if([path length] && [[NSFileManager defaultManager] fileExistsAtPath:path])
+		[[NSWorkspace sharedWorkspace] selectFile:path inFileViewerRootedAtPath:[path stringByDeletingLastPathComponent]];
+	else NSBeep();
+}
+
 - (IBAction)checkboxStatusChanged:(id)sender
 {
 	int i;
@@ -1487,6 +1515,20 @@ static NSString *framesToMSFStr(xldoffset_t frames, int samplerate)
 	else if([menuItem action] == @selector(editMetadata:))
 	{
 		if(![parserArray count]) return NO;
+	}
+	else if([menuItem action] == @selector(showTrackInFinder:))
+	{
+		/* Present always, enabled only for a track that finished ripping and whose
+		   output file still exists. */
+		id cueParser = [self cueParser];
+		NSArray *trackList = cueParser ? [cueParser trackList] : nil;
+		int row = [o_trackTable clickedRow];
+		if(row < 0) row = [o_trackTable selectedRow];
+		if(!trackList || row < 0 || row >= (int)[trackList count]) return NO;
+		id trk = [trackList objectAtIndex:row];
+		NSString *path = [trk respondsToSelector:@selector(outputPath)] ? [trk outputPath] : nil;
+		return ([trk respondsToSelector:@selector(ripState)] && [trk ripState] == 3
+		        && [path length] && [[NSFileManager defaultManager] fileExistsAtPath:path]);
 	}
 	return YES;
 }

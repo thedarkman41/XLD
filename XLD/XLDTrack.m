@@ -15,8 +15,17 @@
 - (void)dealloc
 {
 	if(desiredFileName) [desiredFileName release];
+	if(outputPath) [outputPath release];
 	[metadataDic release];
 	[super dealloc];
+}
+
+- (NSString *)outputPath { return outputPath; }
+- (void)setOutputPath:(NSString *)path
+{
+	if(outputPath == path) return;
+	if(outputPath) [outputPath release];
+	outputPath = [path retain];
 }
 
 - (xldoffset_t)index

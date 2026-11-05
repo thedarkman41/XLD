@@ -73,6 +73,11 @@ static const int fontSizeForSpeed = 9;
 	return self;
 }
 
+- (NSString *)primaryOutputPath
+{
+	return ([outputPathStrArray count]) ? [outputPathStrArray objectAtIndex:0] : nil;
+}
+
 - (IBAction)locateInFinder:(id)sender
 {
 	/* Reveal this task's output in Finder: the output file if it exists yet,

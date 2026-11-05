@@ -12,6 +12,7 @@
 	NSMutableDictionary *metadataDic;
 	int ripState; /* 0 idle, 2 active (ripping), 3 done — for inline progress */
 	double ripProgress; /* 0..1 while ripping — shown in the Pregap column */
+	NSString *outputPath; /* the ripped file's path, set when the rip finishes */
 }
 
 - (xldoffset_t)index;
@@ -32,5 +33,7 @@
 - (void)setRipState:(int)s;
 - (double)ripProgress;
 - (void)setRipProgress:(double)p;
+- (NSString *)outputPath;
+- (void)setOutputPath:(NSString *)path;
 
 @end
