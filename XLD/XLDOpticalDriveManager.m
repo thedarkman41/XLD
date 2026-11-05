@@ -53,8 +53,13 @@ static void DADoneCallback(DADiskRef DiskRef, DADissenterRef DissenterRef, void 
 	DADiskRef disk = DADiskCreateFromBSDName(NULL,session,[dev UTF8String]);
 	DADiskUnmount(disk,kDADiskUnmountOptionDefault,DADoneCallback,NULL);
 	int ret = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 120.0, false);
+	/* Always unschedule the session from the run loop before releasing it, not only
+	   when the unmount callback fired. On a timeout the run-loop source would stay
+	   registered after CFRelease, leaking a DiskArbitration session (and its mach
+	   port) each time; over a long session of many rips that exhausts DiskArbitration
+	   and later DASessionCreate calls block forever (the whole app beachballs). */
+	DASessionUnscheduleFromRunLoop(session, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
 	if (ret == kCFRunLoopRunStopped) {
-		DASessionUnscheduleFromRunLoop(session, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
 		while(1) {
 			int fd = open([dev UTF8String], O_RDONLY);
 			if (fd != -1) {
@@ -80,8 +85,13 @@ static void DADoneCallback(DADiskRef DiskRef, DADissenterRef DissenterRef, void 
 	DADiskRef disk = DADiskCreateFromBSDName(NULL,session,[dev UTF8String]);
 	DADiskUnmount(disk,kDADiskUnmountOptionDefault,DADoneCallback,NULL);
 	int ret = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 120.0, false);
+	/* Always unschedule the session from the run loop before releasing it, not only
+	   when the unmount callback fired. On a timeout the run-loop source would stay
+	   registered after CFRelease, leaking a DiskArbitration session (and its mach
+	   port) each time; over a long session of many rips that exhausts DiskArbitration
+	   and later DASessionCreate calls block forever (the whole app beachballs). */
+	DASessionUnscheduleFromRunLoop(session, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
 	if (ret == kCFRunLoopRunStopped) {
-		DASessionUnscheduleFromRunLoop(session, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
 		while(1) {
 			int fd = open([dev UTF8String], O_RDONLY);
 			if (fd != -1) {

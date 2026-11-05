@@ -5538,11 +5538,17 @@ end:
 	[decoder closeFile];
 	[rippingSession destroy];
 	
-	[opticalDriveManager mountDisc:path];
+	/* Re-mount the disc for Finder on a background thread, not the main one: this
+	   calls DASessionCreate, and if DiskArbitration is wedged (which the optical
+	   drive can do after heavy use) that call never returns. On the main thread that
+	   beachballs the whole app; off it, only a throwaway thread blocks and the UI
+	   stays alive. The mount is just for Finder visibility — XLD doesn't need it to
+	   proceed. */
+	[opticalDriveManager performSelectorInBackground:@selector(mountDisc:) withObject:path];
 	driveIsBusy = NO;
 	[self openParsedDisc:cueParser originalFile:nil];
 	[cueParser release];
-	
+
 	[self delayedRefleshList];
 }
 
