@@ -499,25 +499,43 @@ int xld_cdda_open(xld_cdread_t *disc, const char *device)
 
 void xld_cdda_close(xld_cdread_t *disc)
 {
-	if(!disc->opened) return;
+	if(!disc || !disc->opened) return;
+	/* Mark closed and drop the tracks pointer BEFORE freeing it, so a rip read thread
+	   racing this close sees opened==0 / tracks==NULL and bails (see the guards in
+	   xld_cdda_read_timed / xld_cdda_sector_gettrack) rather than using freed state. */
+	disc->opened = 0;
+	xld_track_t *tracks = disc->tracks;
+	int numTracks = disc->numTracks;
+	disc->tracks = NULL;
+	disc->numTracks = 0;
 	xld_cdda_set_max_speed(disc, -1);
 	if(disc->device) free(disc->device);
-    if(disc->tracks) {
-        int i;
-        for(i=0;i<disc->numTracks;i++) {
-            if(disc->tracks[i].metadata) CFRelease(disc->tracks[i].metadata);
-        }
-        free(disc->tracks);
-    }
+	if(tracks) {
+		int i;
+		for(i=0;i<numTracks;i++) {
+			if(tracks[i].metadata) CFRelease(tracks[i].metadata);
+		}
+		free(tracks);
+	}
 	if(disc->vendor) free(disc->vendor);
 	if(disc->product) free(disc->product);
 	if(disc->revision) free(disc->revision);
-	close(disc->fd);
+	int fd = disc->fd;
 	memset(disc, 0, sizeof(xld_cdread_t));
+	disc->fd = -1; /* memset left fd at 0, a valid descriptor; keep it invalid */
+	if(fd >= 0) close(fd);
 }
 
 int xld_cdda_read_timed(xld_cdread_t *disc, void *buffer, int beginLSN, int nSectors, int *ms)
 {
+	/* Bail if the disc was closed out from under this read thread (session torn down
+	   mid-rip): tracks freed/NULL, struct zeroed, fd closed. Fail the read instead of
+	   dereferencing freed state or reading a stale fd. */
+	if(!disc || !disc->opened || !disc->tracks || disc->fd < 0) {
+		if(buffer && nSectors > 0) memset(buffer, 0, 2352*nSectors);
+		if(ms) *ms = 0;
+		return -1;
+	}
 	dk_cd_read_t cdread;
 	struct timeval tv1, tv2;
 	memset(&cdread, 0, sizeof(cdread));
@@ -650,6 +668,10 @@ int xld_cdda_disc_lastsector_currentsession(xld_cdread_t *disc, int sector)
 
 int xld_cdda_sector_gettrack(xld_cdread_t *disc, int sector)
 {
+	/* The disc may have been closed (tracks freed, struct zeroed) while a rip read
+	   thread was still running — treat that as lead-out rather than dereferencing a
+	   NULL tracks array and crashing. */
+	if(!disc || !disc->tracks || disc->numTracks <= 0) return -1;
 	//sector -= 150;
 	if(sector >= 0 && sector < disc->tracks[0].start) return 0;
 	int i;
