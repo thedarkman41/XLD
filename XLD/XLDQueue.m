@@ -214,7 +214,18 @@ extern int XLDDarkModeSupportEnabled;
 		for(i=0;i<[taskArr count];i++) {
 			if([[taskArr objectAtIndex:i] rippingSession] == rippingSession) { othersUseSession = YES; break; }
 		}
-		if(!othersUseSession && [rippingSession allTasksFinished]) {
+		/* Finalise once NO other queued task still references this disc's session.
+		   When that holds, every track task of the disc has already run through
+		   convertFinished: and been removed, so THIS is the disc's last chance to be
+		   finalised — nothing else will ever call back for it. Finalising here is gated
+		   only on othersUseSession, NOT additionally on allTasksFinished: under
+		   concurrent multi-disc rips a result slot can be left flagged enabled-but-
+		   -unfinished (or carry a stale `pending`), which made allTasksFinished return
+		   NO at this final moment and stranded the disc forever — no eject, no log/cue,
+		   no SpotOn icons, though every track had ripped and embedded its art. */
+		if(!othersUseSession) {
+			if(![rippingSession allTasksFinished])
+				NSLog(@"[XLD] finalising disc with allTasksFinished==NO (no tasks left to finish it); check for a stranded result slot");
 			XLDCDDAResult *resultObj = [[rippingSession result] retain];
 			[rippingSession destroy];
 			[delegate discRippedWithResult:resultObj];
