@@ -1176,10 +1176,61 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return NO;
 }
 
-/* Does a Discogs release (its info dict) actually describe this disc? Audio-track
-   count must line up (allow one trailing data/hidden track) and, when Discogs
-   carries durations for most tracks, those durations must match the disc's TOC —
-   the signal that separates the right release from a same-size different comp. */
+/* A track title normalised for comparison: lowercase, letters/digits only. */
+- (NSString *)normalizedTrackTitle:(NSString *)s
+{
+	if(![s length]) return @"";
+	NSMutableString *m = [NSMutableString string];
+	NSString *low = [s lowercaseString];
+	NSUInteger i, n = [low length];
+	for(i=0;i<n;i++) { unichar c = [low characterAtIndex:i]; if((c>='a'&&c<='z')||(c>='0'&&c<='9')) [m appendFormat:@"%C", c]; }
+	return m;
+}
+
+/* Fraction (0..1) of the disc's *titled* tracks whose title also appears in a Discogs
+   release's tracklist (normalised; exact or either-way containment, so "Electricity,
+   Electricity (new)" still matches "Electricity, Electricity"). The disc's CDDB track
+   names are correct and specific — far more identifying than its album title — so this
+   is the deterministic fingerprint that tells the right release from a same-size
+   different one regardless of which search/path surfaced it. `titledOut` returns how
+   many disc tracks actually had a usable title (so callers can tell "no overlap" from
+   "disc has no titles to compare"). */
+- (double)trackTitleMatchFractionForTrackList:(NSArray *)trackList discogsTracks:(NSArray *)dgTracks titledCount:(int *)titledOut
+{
+	if(titledOut) *titledOut = 0;
+	if(![trackList count] || ![dgTracks count]) return 0.0;
+	NSMutableArray *dg = [NSMutableArray array];
+	int i;
+	for(i=0;i<[dgTracks count];i++) {
+		NSString *t = [self normalizedTrackTitle:[[dgTracks objectAtIndex:i] objectForKey:@"title"]];
+		if([t length] >= 3) [dg addObject:t];
+	}
+	if(![dg count]) return 0.0;
+	int titled = 0, matched = 0;
+	for(i=0;i<[trackList count];i++) {
+		NSString *dt = [self normalizedTrackTitle:[[[trackList objectAtIndex:i] metadata] objectForKey:XLD_METADATA_TITLE]];
+		if([dt length] < 3) continue;
+		titled++;
+		int j;
+		for(j=0;j<[dg count];j++) {
+			NSString *g = [dg objectAtIndex:j];
+			if([dt isEqualToString:g] ||
+			   ([dt length] >= 5 && [g length] >= 5 && ([dt rangeOfString:g].location != NSNotFound || [g rangeOfString:dt].location != NSNotFound))) {
+				matched++; break;
+			}
+		}
+	}
+	if(titledOut) *titledOut = titled;
+	return (titled > 0) ? (double)matched/(double)titled : 0.0;
+}
+
+/* Does a Discogs release (its info dict) actually describe this disc? The audio-track
+   count must line up (allow one trailing data/hidden track). For an identified disc
+   (CDDB gave it track titles) the decision is the deterministic track-title overlap —
+   titles are specific where the promo album title is generic. Only when the disc has
+   no usable titles do we fall back to matching Discogs durations against the TOC. This
+   makes the pick a pure function of (disc tracks, release), not of search order — so
+   the same disc resolves to the same release every time. */
 - (BOOL)discogsInfo:(NSDictionary *)info matchesTrackList:(NSArray *)trackList
 {
 	NSArray *dgTracks = [info objectForKey:@"tracks"];
@@ -1187,6 +1238,11 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	int audioN = (int)[discSecs count];
 	if(audioN <= 0 || ![dgTracks count]) return NO;
 	if(labs((long)[dgTracks count] - (long)audioN) > 1) return NO;
+
+	int titled = 0;
+	double titleFrac = [self trackTitleMatchFractionForTrackList:trackList discogsTracks:dgTracks titledCount:&titled];
+	BOOL discTitled = (titled*2 >= audioN); /* majority of tracks carry a real title */
+
 	NSMutableArray *dgSecs = [NSMutableArray array];
 	int i, withDur = 0;
 	for(i=0;i<[dgTracks count];i++) {
@@ -1194,15 +1250,22 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		if(s > 0) withDur++;
 		[dgSecs addObject:[NSNumber numberWithInt:s]];
 	}
-	if(withDur*2 >= (int)[dgTracks count]) return [self durations:dgSecs matchDurations:discSecs];
-	/* Few/no durations to compare: an exact audio-track-count match is NOT enough on
-	   its own — a 10-track durationless promo of an unrelated artist ("The Aeroplane
-	   Flies High (Box Set Sampler)") otherwise matched a 10-track "... Box Set Sampler"
-	   disc purely on count. Require the release title to also share a significant,
-	   non-generic word with the disc's album title. */
-	if((int)[dgTracks count] != audioN) return NO;
-	NSString *discAlbum = [[[trackList objectAtIndex:0] metadata] objectForKey:XLD_METADATA_ALBUM];
-	return [self title:discAlbum sharesSignificantWordWith:[info objectForKey:@"album"]];
+	BOOL durAvail = (withDur*2 >= (int)[dgTracks count]);
+
+	if(discTitled) {
+		/* Titles are authoritative: a release that actually contains these songs. */
+		if(titleFrac >= 0.6) return YES;
+		/* Messy/spelling-variant titles but durations corroborate and titles don't
+		   flatly disagree: still accept. */
+		if(titleFrac >= 0.3 && durAvail && [self durations:dgSecs matchDurations:discSecs]) return YES;
+		/* Titles clearly disagree (e.g. a same-size unrelated promo): reject even if
+		   durations coincidentally line up — this is what stopped the Smashing Pumpkins
+		   cover landing on a Schoolhouse Rock disc. */
+		return NO;
+	}
+	/* Disc has no usable titles (unidentified): durations are the only signal. */
+	if(durAvail) return [self durations:dgSecs matchDurations:discSecs];
+	return NO;
 }
 
 /* Candidate Discogs release ids for an album, in relevance order. With a token, the
@@ -1282,25 +1345,66 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return ids;
 }
 
+/* A Discogs search query built from a few of the disc's distinctive track titles.
+   The disc's album title is often a generic promo blurb that surfaces unrelated
+   releases ("... Box Set Sampler" -> a Smashing Pumpkins promo), whereas its track
+   titles name the actual songs and surface the right release's family. nil if the
+   disc has no usable titles. */
+- (NSString *)trackTitleSearchQueryForTrackList:(NSArray *)trackList
+{
+	NSMutableArray *picks = [NSMutableArray array];
+	int i;
+	for(i=0;i<[trackList count] && [picks count] < 3;i++) {
+		NSString *t = [[[trackList objectAtIndex:i] metadata] objectForKey:XLD_METADATA_TITLE];
+		if([t length] >= 6) [picks addObject:t]; /* prefer longer, distinctive titles */
+	}
+	for(i=0;i<[trackList count] && [picks count] < 3;i++) {
+		NSString *t = [[[trackList objectAtIndex:i] metadata] objectForKey:XLD_METADATA_TITLE];
+		if([t length] && ![picks containsObject:t]) [picks addObject:t];
+	}
+	return [picks count] ? [picks componentsJoinedByString:@" "] : nil;
+}
+
+/* The best-matching Discogs release among candidate ids, by track-title overlap —
+   deterministic (highest overlap wins, not whichever happened to be checked first).
+   Returns nil if none clears discogsInfo:matchesTrackList:. */
+- (NSDictionary *)bestDiscogsInfoForTrackList:(NSArray *)trackList fromReleaseIDs:(NSArray *)ids
+{
+	NSDictionary *best = nil; double bestFrac = -1.0; int checked = 0, i;
+	for(i=0;i<[ids count] && checked < 8;i++) {
+		checked++;
+		NSDictionary *info = [self discogsInfoFromReleaseID:[ids objectAtIndex:i]];
+		if(!info || ![self discogsInfo:info matchesTrackList:trackList]) continue;
+		int titled = 0;
+		double f = [self trackTitleMatchFractionForTrackList:trackList discogsTracks:[info objectForKey:@"tracks"] titledCount:&titled];
+		if(f > bestFrac) { bestFrac = f; best = info; }
+	}
+	return best;
+}
+
 /* Direct Discogs search for this disc's cover/metadata — used when the MusicBrainz
    paths (TOC, name search -> Discogs link) find nothing, i.e. the disc is on Discogs
-   but not in MusicBrainz. Searches by album (+ artist for non-compilations), then
-   verifies each candidate against the disc before accepting it. */
+   but not in MusicBrainz. Gathers candidates by album title AND by the disc's track
+   titles, then returns the best track-title match (deterministic, order-independent). */
 - (NSDictionary *)discogsSearchInfoForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame album:(NSString *)album artist:(NSString *)artist
 {
 	if(![trackList count]) return nil;
 	NSDictionary *meta = [[trackList objectAtIndex:0] metadata];
 	if(![album length]) album = [meta objectForKey:XLD_METADATA_ALBUM];
 	if(![artist length]) artist = [meta objectForKey:XLD_METADATA_ALBUMARTIST];
-	if(![album length] || [self isPlaceholderDiscTitle:album]) return nil;
-	NSArray *ids = [self discogsSearchReleaseIDsForAlbum:album artist:artist];
-	int i, checked = 0;
-	for(i=0;i<[ids count] && checked < 6;i++) {
-		checked++;
-		NSDictionary *info = [self discogsInfoFromReleaseID:[ids objectAtIndex:i]];
-		if(info && [self discogsInfo:info matchesTrackList:trackList]) return info;
+	BOOL various = (!artist || [artist caseInsensitiveCompare:@"Various Artists"] == NSOrderedSame);
+	NSMutableArray *ids = [NSMutableArray array];
+	if([album length] && ![self isPlaceholderDiscTitle:album])
+		[ids addObjectsFromArray:[self discogsSearchReleaseIDsForAlbum:album artist:artist]];
+	/* Also discover by track titles — finds the right release even when the album
+	   title is too generic to surface it. */
+	NSString *ttq = [self trackTitleSearchQueryForTrackList:trackList];
+	if([ttq length]) {
+		NSArray *ttids = [self discogsReleaseIDsForQuery:ttq various:various artist:artist];
+		int i; for(i=0;i<[ttids count];i++) if(![ids containsObject:[ttids objectAtIndex:i]]) [ids addObject:[ttids objectAtIndex:i]];
 	}
-	return nil;
+	if(![ids count]) return nil;
+	return [self bestDiscogsInfoForTrackList:trackList fromReleaseIDs:ids];
 }
 
 /* A title normalised for loose matching: lowercase, letters/digits only. */
@@ -1415,15 +1519,25 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 				looseImage = img;
 		}
 	}
-	int i;
-	/* 1) verified: fetch each candidate's release and match it to the disc. */
-	int checked = 0;
-	for(i=0;i<[ids count] && checked < 6;i++) {
-		checked++;
-		NSDictionary *info = [self discogsInfoFromReleaseID:[ids objectAtIndex:i]];
-		if(info && [self discogsInfo:info matchesTrackList:trackList]) return info;
+	/* Also discover by track titles: the disc's song names surface the right release
+	   even when its album title is too generic to. Add those release ids too. */
+	NSString *ttq = [self trackTitleSearchQueryForTrackList:trackList];
+	if([ttq length]) {
+		NSArray *results = [self searxngDiscogsResultsForQuery:ttq];
+		int i;
+		for(i=0;i<[results count];i++) {
+			NSDictionary *r = [results objectAtIndex:i];
+			if(![r isKindOfClass:[NSDictionary class]]) continue;
+			NSString *rid = [self discogsReleaseIDFromURLString:[r objectForKey:@"url"]];
+			if([rid length] && ![ids containsObject:rid]) [ids addObject:rid];
+		}
 	}
-	/* 2) nothing verified — use the top title-matching cover as a last resort. */
+	/* 1) verified: among all candidates, take the BEST track-title match (deterministic,
+	   independent of the order the search returned them). */
+	NSDictionary *best = [self bestDiscogsInfoForTrackList:trackList fromReleaseIDs:ids];
+	if(best) return best;
+	/* 2) nothing verified — use the top significant-title-matching release cover as a
+	   last resort (never an artist logo or an unrelated same-size promo). */
 	if([looseImage length])
 		return [NSDictionary dictionaryWithObjectsAndKeys:[NSArray arrayWithObject:looseImage],@"images",[NSArray array],@"tracks",nil];
 	return nil;
