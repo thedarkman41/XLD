@@ -1134,11 +1134,12 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 /* Candidate Discogs release ids for an album, in relevance order. With a token, the
    authenticated database search; otherwise the search page scraped past Cloudflare
    through the local FlareSolverr, with the release ids parsed from the HTML. */
-- (NSArray *)discogsSearchReleaseIDsForAlbum:(NSString *)album artist:(NSString *)artist
+/* Candidate Discogs release ids for one query string (token API when a token is
+   set, else the search page via FlareSolverr). */
+- (NSArray *)discogsReleaseIDsForQuery:(NSString *)album various:(BOOL)various artist:(NSString *)artist
 {
 	NSMutableArray *ids = [NSMutableArray array];
 	if(![album length]) return ids;
-	BOOL various = (!artist || [artist caseInsensitiveCompare:@"Various Artists"] == NSOrderedSame);
 	NSString *token = [self discogsToken];
 	if([token length]) {
 		NSMutableString *q = [NSMutableString stringWithString:album];
@@ -1189,6 +1190,24 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return ids;
 }
 
+/* Candidate Discogs release ids for an album, trying the full title and the
+   series-stripped variants (so a catalog-prefixed CDDB title still finds the
+   release Discogs catalogues under its short name). */
+- (NSArray *)discogsSearchReleaseIDsForAlbum:(NSString *)album artist:(NSString *)artist
+{
+	NSMutableArray *ids = [NSMutableArray array];
+	if(![album length]) return ids;
+	BOOL various = (!artist || [artist caseInsensitiveCompare:@"Various Artists"] == NSOrderedSame);
+	NSArray *variants = [self albumQueryVariants:album];
+	int vi;
+	for(vi=0;vi<[variants count] && [ids count] < 6;vi++) {
+		NSArray *vids = [self discogsReleaseIDsForQuery:[variants objectAtIndex:vi] various:various artist:artist];
+		int i;
+		for(i=0;i<[vids count];i++) if(![ids containsObject:[vids objectAtIndex:i]]) [ids addObject:[vids objectAtIndex:i]];
+	}
+	return ids;
+}
+
 /* Direct Discogs search for this disc's cover/metadata — used when the MusicBrainz
    paths (TOC, name search -> Discogs link) find nothing, i.e. the disc is on Discogs
    but not in MusicBrainz. Searches by album (+ artist for non-compilations), then
@@ -1224,6 +1243,30 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	return m;
 }
 
+/* Title variants to search Discogs with. A CDDB/gnudb album title often carries a
+   series/catalog prefix the actual release isn't titled with — e.g. "THITS Post
+   Modern Syndrome Vol 23 - Postmodernbra" is catalogued on Discogs as just
+   "Postmodernbra". So besides the full title, also try the part after the last
+   " - " and the part before the first " - ". Ordered, de-duplicated. */
+- (NSArray *)albumQueryVariants:(NSString *)album
+{
+	NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+	NSString *full = [album stringByTrimmingCharactersInSet:ws];
+	NSMutableArray *v = [NSMutableArray array];
+	if([full length]) [v addObject:full];
+	NSRange last = [full rangeOfString:@" - " options:NSBackwardsSearch];
+	if(last.location != NSNotFound) {
+		NSString *after = [[full substringFromIndex:last.location+3] stringByTrimmingCharactersInSet:ws];
+		if([after length] >= 3 && ![v containsObject:after]) [v addObject:after];
+	}
+	NSRange first = [full rangeOfString:@" - "];
+	if(first.location != NSNotFound) {
+		NSString *before = [[full substringToIndex:first.location] stringByTrimmingCharactersInSet:ws];
+		if([before length] >= 3 && ![v containsObject:before]) [v addObject:before];
+	}
+	return v;
+}
+
 /* The Discogs release id in a .../release/<digits>-... URL, else nil. */
 - (NSString *)discogsReleaseIDFromURLString:(NSString *)url
 {
@@ -1234,6 +1277,23 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	NSUInteger j = 0, tl = [tail length];
 	while(j < tl) { unichar c = [tail characterAtIndex:j]; if(c<'0'||c>'9') break; j++; }
 	return (j>0) ? [tail substringToIndex:j] : nil;
+}
+
+/* One query against the local SearXNG server's Discogs engine; the raw results
+   array (each item has title / url / img_src), or nil if SearXNG is unreachable. */
+- (NSArray *)searxngDiscogsResultsForQuery:(NSString *)q
+{
+	if(![q length]) return nil;
+	NSString *enc = [q stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+	NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:8899/api/search?q=%@&categories=music&engines=discogs", enc];
+	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+	[req setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
+	[req setTimeoutInterval:25.0];
+	NSData *data = [self synchronousDataForRequest:req timeout:30.0];
+	if(!data) return nil;
+	id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+	NSArray *results = [json isKindOfClass:[NSDictionary class]] ? [json objectForKey:@"results"] : nil;
+	return [results isKindOfClass:[NSArray class]] ? results : nil;
 }
 
 /* FINAL cover/metadata fallback: the local SearXNG server's Discogs engine
@@ -1249,33 +1309,33 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	NSDictionary *meta = [[trackList objectAtIndex:0] metadata];
 	if(![album length]) album = [meta objectForKey:XLD_METADATA_ALBUM];
 	if(![album length] || [self isPlaceholderDiscTitle:album]) return nil;
-	NSString *enc = [album stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-	NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:8899/api/search?q=%@&categories=music&engines=discogs", enc];
-	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
-	[req setValue:[self userAgentString] forHTTPHeaderField:@"User-Agent"];
-	[req setTimeoutInterval:25.0];
-	NSData *data = [self synchronousDataForRequest:req timeout:30.0];
-	if(!data) return nil;
-	id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-	NSArray *results = [json isKindOfClass:[NSDictionary class]] ? [json objectForKey:@"results"] : nil;
-	if(![results isKindOfClass:[NSArray class]]) return nil;
 
-	NSString *na = [self normalizedTitleKey:album];
+	/* Try the full title and the series-stripped variants; match each result against
+	   the variant that produced it (not the full title), so "Postmodernbra" found via
+	   its own variant is kept even though the disc's title is the longer catalog name. */
+	NSArray *variants = [self albumQueryVariants:album];
 	NSMutableArray *ids = [NSMutableArray array];
 	NSString *looseImage = nil;
-	int i;
-	for(i=0;i<[results count];i++) {
-		NSDictionary *r = [results objectAtIndex:i];
-		if(![r isKindOfClass:[NSDictionary class]]) continue;
-		NSString *nt = [self normalizedTitleKey:[r objectForKey:@"title"]];
-		/* keep only results whose title shares the album title (either direction) */
-		if(![na length] || ![nt length]) continue;
-		if([nt rangeOfString:na].location == NSNotFound && [na rangeOfString:nt].location == NSNotFound) continue;
-		NSString *rid = [self discogsReleaseIDFromURLString:[r objectForKey:@"url"]];
-		if([rid length] && ![ids containsObject:rid]) [ids addObject:rid];
-		NSString *img = [r objectForKey:@"img_src"];
-		if(!looseImage && [img length]) looseImage = img;
+	int vi;
+	for(vi=0;vi<[variants count];vi++) {
+		NSString *variant = [variants objectAtIndex:vi];
+		NSString *nv = [self normalizedTitleKey:variant];
+		if(![nv length]) continue;
+		NSArray *results = [self searxngDiscogsResultsForQuery:variant];
+		int i;
+		for(i=0;i<[results count];i++) {
+			NSDictionary *r = [results objectAtIndex:i];
+			if(![r isKindOfClass:[NSDictionary class]]) continue;
+			NSString *nt = [self normalizedTitleKey:[r objectForKey:@"title"]];
+			if(![nt length]) continue;
+			if([nt rangeOfString:nv].location == NSNotFound && [nv rangeOfString:nt].location == NSNotFound) continue;
+			NSString *rid = [self discogsReleaseIDFromURLString:[r objectForKey:@"url"]];
+			if([rid length] && ![ids containsObject:rid]) [ids addObject:rid];
+			NSString *img = [r objectForKey:@"img_src"];
+			if(!looseImage && [img length]) looseImage = img;
+		}
 	}
+	int i;
 	/* 1) verified: fetch each candidate's release and match it to the disc. */
 	int checked = 0;
 	for(i=0;i<[ids count] && checked < 6;i++) {
