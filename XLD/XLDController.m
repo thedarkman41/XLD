@@ -969,6 +969,20 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
    MusicBrainz by album + artist (preferring editions with the same track count,
    like picking the right row from the search page) and take the first candidate
    that does link to Discogs. nil if nothing links out. */
+/* A disc title that carries no real identity — the generic volume name of an
+   unidentified audio CD, or no title at all. Searching Discogs/MusicBrainz by such
+   a title returns unrelated releases, so a title-based cover/metadata search must
+   NOT run for it (that is how an unidentified disc ends up with random artwork). */
+- (BOOL)isPlaceholderDiscTitle:(NSString *)title
+{
+	NSString *t = [title stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	if(![t length]) return YES;
+	if([t caseInsensitiveCompare:LS(@"Audio CD")] == NSOrderedSame) return YES;
+	if([t caseInsensitiveCompare:@"Audio CD"] == NSOrderedSame) return YES;
+	if([t caseInsensitiveCompare:@"Unknown Album"] == NSOrderedSame) return YES;
+	return NO;
+}
+
 - (NSString *)discogsReleaseURLForTrackList:(NSArray *)trackList totalFrame:(int)totalFrame album:(NSString *)album artist:(NSString *)artist
 {
 	/* 1) disc-id / TOC match. */
@@ -987,7 +1001,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	NSDictionary *meta = [[trackList objectAtIndex:0] metadata];
 	if(![album length]) album = [meta objectForKey:XLD_METADATA_ALBUM];
 	if(![artist length]) artist = [meta objectForKey:XLD_METADATA_ALBUMARTIST];
-	if(![album length]) return nil;
+	if(![album length] || [self isPlaceholderDiscTitle:album]) return nil;
 	int audioN = 0, i;
 	for(i=0;i<[trackList count];i++)
 		if(![[[trackList objectAtIndex:i] metadata] objectForKey:XLD_METADATA_DATATRACK]) audioN++;
@@ -1185,7 +1199,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	NSDictionary *meta = [[trackList objectAtIndex:0] metadata];
 	if(![album length]) album = [meta objectForKey:XLD_METADATA_ALBUM];
 	if(![artist length]) artist = [meta objectForKey:XLD_METADATA_ALBUMARTIST];
-	if(![album length]) return nil;
+	if(![album length] || [self isPlaceholderDiscTitle:album]) return nil;
 	NSArray *ids = [self discogsSearchReleaseIDsForAlbum:album artist:artist];
 	int i, checked = 0;
 	for(i=0;i<[ids count] && checked < 6;i++) {
@@ -1234,7 +1248,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 	if(![trackList count]) return nil;
 	NSDictionary *meta = [[trackList objectAtIndex:0] metadata];
 	if(![album length]) album = [meta objectForKey:XLD_METADATA_ALBUM];
-	if(![album length]) return nil;
+	if(![album length] || [self isPlaceholderDiscTitle:album]) return nil;
 	NSString *enc = [album stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
 	NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:8899/api/search?q=%@&categories=music&engines=discogs", enc];
 	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
