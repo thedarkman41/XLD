@@ -690,6 +690,27 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		}
 	}
 	id hasMetadata = [[[[cueParser trackList] objectAtIndex:0] metadata] objectForKey:@"HasMetadata"];
+	/* Collapse indistinguishable matches: freedb often returns the same disc under
+	   several genre categories, so the picker shows two or more rows with identical
+	   title + artist and nothing to choose between. When every match has the same
+	   displayed title and artist, auto-pick the first instead of prompting. */
+	BOOL indistinctMatches = NO;
+	if(ret >= 2) {
+		NSArray *qr = [util queryResult];
+		NSArray *first = [qr objectAtIndex:0];
+		NSString *ft = ([first count] > 3) ? [first objectAtIndex:3] : nil;
+		NSString *fa = ([first count] > 4) ? [first objectAtIndex:4] : nil;
+		indistinctMatches = YES;
+		int k;
+		for(k=1;k<ret;k++) {
+			NSArray *row = [qr objectAtIndex:k];
+			NSString *t = ([row count] > 3) ? [row objectAtIndex:3] : nil;
+			NSString *a = ([row count] > 4) ? [row objectAtIndex:4] : nil;
+			BOOL sameT = (ft == t) || (ft && [ft isEqual:t]);
+			BOOL sameA = (fa == a) || (fa && [fa isEqual:a]);
+			if(!(sameT && sameA)) { indistinctMatches = NO; break; }
+		}
+	}
 	if(ret == 0) {
 		[util readCDDBWithInfo:nil];
 		if(!start) [self fillMusicBrainzTextSync:cueParser];
@@ -762,7 +783,7 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		[util release];
 		util = nil;
 	}
-	else if(ret == 1 || (!manualQuery && [o_dontPromptForCDDB state] == NSOnState)) {
+	else if(ret == 1 || indistinctMatches || (!manualQuery && [o_dontPromptForCDDB state] == NSOnState)) {
 		XLDCDDBResult result = [util readCDDBWithInfo:[[util queryResult] objectAtIndex:0]];
 		if(!start) [self fillMusicBrainzTextSync:cueParser];
 		if(result == XLDCDDBSuccess) {
