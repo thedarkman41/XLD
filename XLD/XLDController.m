@@ -783,7 +783,13 @@ static void getFilesFromM3U(NSString *m3u, NSMutableArray *queue, NSStringEncodi
 		[util release];
 		util = nil;
 	}
-	else if(ret == 1 || indistinctMatches || (!manualQuery && [o_dontPromptForCDDB state] == NSOnState)) {
+	/* An AUTOMATIC lookup (disc insert) never prompts: with multiple matches it
+	   auto-picks the first and populates, so an identified disc is never left showing
+	   the generic "Audio CD" just because it matched more than one release (usually
+	   different pressings of the same album). The "Multiple matches" picker is kept
+	   only for a MANUAL "Get CD track names", where the user explicitly asked to
+	   choose. The "Don't prompt" preference no longer gates this — auto never nags. */
+	else if(ret == 1 || indistinctMatches || !manualQuery) {
 		XLDCDDBResult result = [util readCDDBWithInfo:[[util queryResult] objectAtIndex:0]];
 		if(!start) [self fillMusicBrainzTextSync:cueParser];
 		if(result == XLDCDDBSuccess) {
